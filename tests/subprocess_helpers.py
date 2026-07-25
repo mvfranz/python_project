@@ -18,9 +18,11 @@ import sys
 from pathlib import Path
 
 
-def run_file(path: Path) -> subprocess.CompletedProcess:
+def run_file(path: Path, *extra_paths: Path) -> subprocess.CompletedProcess:
+    """Runs `modplusc run path [extra_paths...]` -- `path` is the program's
+    entry module; `extra_paths` are additional modules it IMPORTs."""
     return subprocess.run(
-        [sys.executable, "-m", "modplus.cli", "run", str(path)],
+        [sys.executable, "-m", "modplus.cli", "run", str(path), *(str(p) for p in extra_paths)],
         capture_output=True,
         text=True,
     )
