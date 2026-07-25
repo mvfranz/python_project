@@ -329,3 +329,109 @@ def test_record_equality_is_rejected():
         """,
         "RECORD or ARRAY",
     )
+
+
+def test_string_literal_assigns_to_a_large_enough_char_array():
+    prog = check(
+        """
+        MODULE M;
+        VAR s: ARRAY[10] OF CHAR;
+        BEGIN
+          s := "hello";
+        END M.
+        """
+    )
+    assert prog is not None
+
+
+def test_string_literal_too_long_for_target_array_rejected():
+    expect_error(
+        """
+        MODULE M;
+        VAR s: ARRAY[3] OF CHAR;
+        BEGIN
+          s := "hello";
+        END M.
+        """,
+        "cannot assign",
+    )
+
+
+def test_string_literal_with_out_of_range_char_rejected():
+    expect_error(
+        'MODULE M; VAR s: ARRAY[4] OF CHAR; BEGIN s := "' + chr(300) + '"; END M.',
+        "code point > 255",
+    )
+
+
+def test_write_string_accepts_literal_and_char_array():
+    prog = check(
+        """
+        MODULE M;
+        VAR s: ARRAY[10] OF CHAR;
+        BEGIN
+          s := "hi";
+          WriteString(s);
+          WriteString("hi");
+        END M.
+        """
+    )
+    assert prog is not None
+
+
+def test_write_string_rejects_non_char_argument():
+    expect_error(
+        """
+        MODULE M;
+        VAR i: INTEGER;
+        BEGIN
+          WriteString(i);
+        END M.
+        """,
+        "expects an ARRAY OF CHAR or a string literal",
+    )
+
+
+def test_string_literal_cannot_be_a_var_argument():
+    expect_error(
+        """
+        MODULE M;
+        PROCEDURE F(VAR s: ARRAY[10] OF CHAR);
+        BEGIN
+        END F;
+        BEGIN
+          F("hello");
+        END M.
+        """,
+        "VAR parameter",
+    )
+
+
+def test_string_literal_as_ordinary_procedure_argument():
+    prog = check(
+        """
+        MODULE M;
+        PROCEDURE Greet(name: ARRAY[10] OF CHAR);
+        BEGIN
+          WriteString(name);
+        END Greet;
+        BEGIN
+          Greet("Ada");
+        END M.
+        """
+    )
+    assert prog is not None
+
+
+def test_write_string_rejects_reserved_name_redeclaration():
+    expect_error(
+        """
+        MODULE M;
+        PROCEDURE WriteString(x: INTEGER);
+        BEGIN
+        END WriteString;
+        BEGIN
+        END M.
+        """,
+        "reserved",
+    )

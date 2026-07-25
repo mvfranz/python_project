@@ -105,6 +105,12 @@ class CharLit(Expr):
 
 
 @dataclass
+class StringLit(Expr):
+    value: str
+    pos: SourcePos
+
+
+@dataclass
 class NilLit(Expr):
     pos: SourcePos
 

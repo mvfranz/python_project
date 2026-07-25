@@ -504,6 +504,9 @@ class Parser:
         if tok.kind == TokKind.CHAR_LIT:
             self._advance()
             return A.CharLit(tok.text, pos)
+        if tok.kind == TokKind.STRING_LIT:
+            self._advance()
+            return A.StringLit(tok.text, pos)
         if tok.kind == TokKind.KEYWORD and tok.text == "TRUE":
             self._advance()
             return A.BoolLit(True, pos)

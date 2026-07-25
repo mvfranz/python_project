@@ -1,0 +1,28 @@
+(* modplus has no separate STRING type -- a string literal is just sugar
+   for an ARRAY OF CHAR value, exactly matching Modula-2's own convention.
+   A literal is assignment-compatible with any ARRAY[N] OF CHAR that has
+   room for its text plus a null terminator, and can likewise be passed
+   directly as a by-value ARRAY OF CHAR argument. WriteString prints
+   either a literal or an ARRAY OF CHAR variable, stopping at the first
+   null byte.
+*)
+MODULE Strings;
+
+VAR greeting: ARRAY[20] OF CHAR;
+
+PROCEDURE Greet(who: ARRAY[10] OF CHAR);
+BEGIN
+  WriteString("Hello, ");
+  WriteString(who);
+  WriteString("!");
+  WriteLn;
+END Greet;
+
+BEGIN
+  greeting := "modplus";
+  WriteString(greeting);
+  WriteLn;
+
+  Greet("Ada");
+  Greet("Grace");
+END Strings.

@@ -134,3 +134,19 @@ def test_nested_procedures_are_parsed_but_flagged_for_sema():
     )
     (proc,) = mod.procs
     assert len(proc.nested_procs) == 1
+
+
+def test_string_literal_parses_as_an_expression():
+    mod = parse(
+        """
+        MODULE M;
+        VAR s: ARRAY[10] OF CHAR;
+        BEGIN
+          s := "hello";
+        END M.
+        """
+    )
+    (stmt,) = mod.body
+    assert isinstance(stmt, A.Assign)
+    assert isinstance(stmt.value, A.StringLit)
+    assert stmt.value.value == "hello"

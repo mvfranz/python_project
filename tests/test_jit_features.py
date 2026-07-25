@@ -165,6 +165,30 @@ def test_recursive_procedure(tmp_path):
     assert result.stdout.splitlines() == ["720"]
 
 
+def test_string_assignment_and_write_string(tmp_path):
+    src = """
+    MODULE M;
+    VAR name: ARRAY[10] OF CHAR;
+
+    PROCEDURE Greet(who: ARRAY[10] OF CHAR);
+    BEGIN
+      WriteString("Hello, ");
+      WriteString(who);
+      WriteString("!");
+      WriteLn;
+    END Greet;
+
+    BEGIN
+      name := "world";
+      Greet(name);
+      Greet("Ada");
+    END M.
+    """
+    result = run_source(tmp_path, src)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["Hello, world!", "Hello, Ada!"]
+
+
 def test_recursive_generic_instantiation(tmp_path):
     src = """
     MODULE M;
