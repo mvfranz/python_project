@@ -1,12 +1,15 @@
 """Feature-focused JIT tests that aren't already covered by an example
 program: REPEAT, descending FOR, VAR (by-reference) parameters, BOOLEAN/CHAR
 comparisons, and the ORD/CHR/FLOAT/TRUNC builtin conversions.
+
+Run as real `modplusc` subprocesses (see `subprocess_helpers.py` for why),
+not called in-process.
 """
 
-from modplus.jit import run
+from .subprocess_helpers import run_source
 
 
-def test_repeat_until(capfd):
+def test_repeat_until(tmp_path):
     src = """
     MODULE M;
     VAR i: INTEGER;
@@ -19,11 +22,12 @@ def test_repeat_until(capfd):
       UNTIL i >= 3;
     END M.
     """
-    assert run(src) == 0
-    assert capfd.readouterr().out.splitlines() == ["0", "1", "2"]
+    result = run_source(tmp_path, src)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["0", "1", "2"]
 
 
-def test_descending_for_loop(capfd):
+def test_descending_for_loop(tmp_path):
     src = """
     MODULE M;
     VAR i: INTEGER;
@@ -34,11 +38,12 @@ def test_descending_for_loop(capfd):
       END;
     END M.
     """
-    assert run(src) == 0
-    assert capfd.readouterr().out.splitlines() == ["3", "2", "1"]
+    result = run_source(tmp_path, src)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["3", "2", "1"]
 
 
-def test_var_parameter_mutates_caller_variable(capfd):
+def test_var_parameter_mutates_caller_variable(tmp_path):
     src = """
     MODULE M;
     VAR x: INTEGER;
@@ -55,11 +60,12 @@ def test_var_parameter_mutates_caller_variable(capfd):
       WriteLn;
     END M.
     """
-    assert run(src) == 0
-    assert capfd.readouterr().out.splitlines() == ["42"]
+    result = run_source(tmp_path, src)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["42"]
 
 
-def test_ord_and_chr_roundtrip(capfd):
+def test_ord_and_chr_roundtrip(tmp_path):
     src = """
     MODULE M;
     VAR c: CHAR; n: INTEGER;
@@ -73,11 +79,12 @@ def test_ord_and_chr_roundtrip(capfd):
       WriteLn;
     END M.
     """
-    assert run(src) == 0
-    assert capfd.readouterr().out.splitlines() == ["65", "B"]
+    result = run_source(tmp_path, src)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["65", "B"]
 
 
-def test_boolean_and_char_comparisons(capfd):
+def test_boolean_and_char_comparisons(tmp_path):
     src = """
     MODULE M;
     VAR flag: BOOLEAN;
@@ -90,11 +97,12 @@ def test_boolean_and_char_comparisons(capfd):
       WriteLn;
     END M.
     """
-    assert run(src) == 0
-    assert capfd.readouterr().out.splitlines() == ["TRUE", "FALSE"]
+    result = run_source(tmp_path, src)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["TRUE", "FALSE"]
 
 
-def test_pointer_equality_and_nil(capfd):
+def test_pointer_equality_and_nil(tmp_path):
     src = """
     MODULE M;
     TYPE Node = RECORD x: INTEGER; END;
@@ -110,11 +118,12 @@ def test_pointer_equality_and_nil(capfd):
       DISPOSE(a);
     END M.
     """
-    assert run(src) == 0
-    assert capfd.readouterr().out.splitlines() == ["TRUE", "TRUE"]
+    result = run_source(tmp_path, src)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["TRUE", "TRUE"]
 
 
-def test_generic_explicit_instantiation_and_inference_share_cache(capfd):
+def test_generic_explicit_instantiation_and_inference_share_cache(tmp_path):
     src = """
     MODULE M;
     GENERIC PROCEDURE Twice<T>(a: T): T;
@@ -131,11 +140,12 @@ def test_generic_explicit_instantiation_and_inference_share_cache(capfd):
       WriteLn;
     END M.
     """
-    assert run(src) == 0
-    assert capfd.readouterr().out.splitlines() == ["8", "10"]
+    result = run_source(tmp_path, src)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["8", "10"]
 
 
-def test_recursive_procedure(capfd):
+def test_recursive_procedure(tmp_path):
     src = """
     MODULE M;
     PROCEDURE Fact(n: INTEGER): INTEGER;
@@ -150,11 +160,12 @@ def test_recursive_procedure(capfd):
       WriteLn;
     END M.
     """
-    assert run(src) == 0
-    assert capfd.readouterr().out.splitlines() == ["720"]
+    result = run_source(tmp_path, src)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["720"]
 
 
-def test_recursive_generic_instantiation(capfd):
+def test_recursive_generic_instantiation(tmp_path):
     src = """
     MODULE M;
     GENERIC PROCEDURE Fact<T>(n: T): T;
@@ -169,5 +180,6 @@ def test_recursive_generic_instantiation(capfd):
       WriteLn;
     END M.
     """
-    assert run(src) == 0
-    assert capfd.readouterr().out.splitlines() == ["720"]
+    result = run_source(tmp_path, src)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["720"]

@@ -2,13 +2,20 @@ from pathlib import Path
 
 from modplus.cli import main
 
+from .subprocess_helpers import run_file
+
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 
 
-def test_cli_run(capfd):
-    code = main(["run", str(EXAMPLES_DIR / "hello.m2p")])
-    assert code == 0
-    assert capfd.readouterr().out.splitlines() == ["25", "55"]
+def test_cli_run():
+    # Run as a real subprocess, not via capfd: the compiled program prints
+    # through a JIT-compiled call to libc's `printf`, and capfd's in-process
+    # fd redirection doesn't reliably see that on Windows (see
+    # subprocess_helpers.py). emit-llvm/emit-object/error-reporting below
+    # only ever produce plain Python-level output, so capfd is fine there.
+    result = run_file(EXAMPLES_DIR / "hello.m2p")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["25", "55"]
 
 
 def test_cli_emit_llvm_to_stdout(capfd):

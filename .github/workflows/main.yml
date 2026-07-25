@@ -91,4 +91,4 @@ jobs:
       - name: Install project
         run: pip install -e .[test]
       - name: run tests
-        run: pytest -s -vvvv -l --tb=long tests
+        run: python -m pytest -vv -l --tb=long tests
