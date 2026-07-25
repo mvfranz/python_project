@@ -1,0 +1,41 @@
+(* OWN POINTER TO T is the other half of modplus's memory story: the
+   compiler inserts the matching free() itself at every point the
+   declaring scope is left (here, falling off the end of MakeAndUse), so
+   manually calling DISPOSE on one is a compile error -- there is exactly
+   one place ownership can end, and the compiler puts the call there for
+   you. Compare with linked_list.m2p, where every free() is written by
+   hand. Use OWN for "this pointer's lifetime is exactly this scope";
+   use plain POINTER when the allocation must outlive the scope that
+   created it (e.g. linking it into a longer-lived structure).
+*)
+MODULE OwnPointer;
+
+TYPE
+  Buffer = RECORD
+    a, b, c: INTEGER;
+  END;
+
+PROCEDURE MakeAndUse(seed: INTEGER): INTEGER;
+VAR
+  buf: OWN POINTER TO Buffer;
+BEGIN
+  NEW(buf);
+  buf^.a := seed;
+  buf^.b := seed * 2;
+  buf^.c := seed * 3;
+  RETURN buf^.a + buf^.b + buf^.c;
+  (* `buf` is freed automatically here, on every path out of this
+     procedure, whether by this RETURN or by falling off the end. *)
+END MakeAndUse;
+
+VAR
+  i, total: INTEGER;
+
+BEGIN
+  total := 0;
+  FOR i := 1 TO 4 DO
+    total := total + MakeAndUse(i);
+  END;
+  WriteInt(total);
+  WriteLn;
+END OwnPointer.

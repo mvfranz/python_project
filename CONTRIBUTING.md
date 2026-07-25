@@ -1,6 +1,6 @@
 # How to develop on this project
 
-python_project welcomes contributions from the community.
+modplus welcomes contributions from the community.
 
 **You need PYTHON3!**
 
@@ -8,7 +8,7 @@ This instructions are for linux base systems. (Linux, MacOS, BSD, etc.)
 ## Setting up your own fork of this repo.
 
 - On github interface click on `Fork` button.
-- Clone your fork of this repo. `git clone git@github.com:YOUR_GIT_USERNAME/python_project.git`
+- Clone your fork of this repo. `git clone git@github.com:YOUR_GIT_USERNAME/python_project.git  # (this repo hosts the modplus compiler)`
 - Enter the directory `cd python_project`
 - Add upstream repo `git remote add upstream https://github.com/mvfranz/python_project`
 
@@ -79,16 +79,15 @@ Usage: make <target>
 Targets:
 help:             ## Show the help.
 install:          ## Install the project in dev mode.
-fmt:              ## Format code using black & isort.
-lint:             ## Run pep8, black, mypy linters.
+fmt:              ## Format code using ruff.
+lint:             ## Run ruff and mypy linters.
 test: lint        ## Run tests and generate coverage report.
+examples:         ## Run every example program under examples/.
 watch:            ## Run tests on every change.
 clean:            ## Clean unused files.
 virtualenv:       ## Create a virtual environment.
 release:          ## Create a new tag for release.
 docs:             ## Build the documentation.
-switch-to-poetry: ## Switch to poetry package manager.
-init:             ## Initialize the project based on an application template.
 ```
 
 ## Making a new release

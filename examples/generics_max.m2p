@@ -1,0 +1,45 @@
+(* C++-style templates: GENERIC PROCEDURE is instantiated (monomorphized)
+   once per concrete type argument, with zero runtime dispatch cost -- each
+   instantiation below compiles to its own dedicated machine code, just
+   like a hand-written overload. `Max<INTEGER>` is an explicit
+   specialization: the compiler uses that body instead of substituting
+   INTEGER into the generic template.
+*)
+MODULE GenericsMax;
+
+GENERIC PROCEDURE Max<T>(a, b: T): T;
+BEGIN
+  IF a > b THEN
+    RETURN a;
+  ELSE
+    RETURN b;
+  END;
+END Max;
+
+(* Explicit specialization for INTEGER: ties get broken in favor of `a`. *)
+PROCEDURE Max<INTEGER>(a, b: INTEGER): INTEGER;
+BEGIN
+  IF a >= b THEN
+    RETURN a;
+  END;
+  RETURN b;
+END Max;
+
+VAR
+  i: INTEGER;
+  r: REAL;
+  c: CHAR;
+
+BEGIN
+  i := Max<INTEGER>(7, 3);      (* uses the explicit specialization *)
+  WriteInt(i);
+  WriteLn;
+
+  r := Max(2.5, 9.75);          (* template argument deduced as REAL *)
+  WriteReal(r);
+  WriteLn;
+
+  c := Max('a', 'z');           (* template argument deduced as CHAR *)
+  WriteChar(c);
+  WriteLn;
+END GenericsMax.

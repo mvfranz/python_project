@@ -25,27 +25,32 @@ install:          ## Install the project in dev mode.
 	$(ENV_PREFIX)pip install -e .[test]
 
 .PHONY: fmt
-fmt:              ## Format code using black & isort.
-	$(ENV_PREFIX)isort python_project/
-	$(ENV_PREFIX)black -l 79 python_project/
-	$(ENV_PREFIX)black -l 79 tests/
+fmt:              ## Format code using ruff.
+	$(ENV_PREFIX)python -m ruff format src/ tests/
+	$(ENV_PREFIX)python -m ruff check --fix src/ tests/
 
 .PHONY: lint
-lint:             ## Run pep8, black, mypy linters.
-	$(ENV_PREFIX)flake8 python_project/
-	$(ENV_PREFIX)black -l 79 --check python_project/
-	$(ENV_PREFIX)black -l 79 --check tests/
-	$(ENV_PREFIX)mypy --ignore-missing-imports python_project/
+lint:             ## Run ruff and mypy linters.
+	$(ENV_PREFIX)python -m ruff check src/ tests/
+	$(ENV_PREFIX)python -m ruff format --check src/ tests/
+	$(ENV_PREFIX)python -m mypy src/modplus
 
 .PHONY: test
 test: lint        ## Run tests and generate coverage report.
-	$(ENV_PREFIX)pytest -v --cov-config .coveragerc --cov=python_project -l --tb=short --maxfail=1 tests/
-	$(ENV_PREFIX)coverage xml
-	$(ENV_PREFIX)coverage html
+	$(ENV_PREFIX)python -m pytest -v --cov=modplus -l --tb=short --maxfail=1 tests/
+	$(ENV_PREFIX)python -m coverage xml
+	$(ENV_PREFIX)python -m coverage html
+
+.PHONY: examples
+examples:         ## Run every example program under examples/.
+	@for f in examples/*.m2p; do \
+		echo "=== $$f ==="; \
+		$(ENV_PREFIX)python -m modplus.cli run "$$f" || exit 1; \
+	done
 
 .PHONY: watch
 watch:            ## Run tests on every change.
-	ls **/**.py | entr $(ENV_PREFIX)pytest -s -vvv -l --tb=long --maxfail=1 tests/
+	ls **/**.py | entr $(ENV_PREFIX)python -m pytest -s -vvv -l --tb=long --maxfail=1 tests/
 
 .PHONY: clean
 clean:            ## Clean unused files.
@@ -76,11 +81,11 @@ virtualenv:       ## Create a virtual environment.
 
 .PHONY: release
 release:          ## Create a new tag for release.
-	@echo "WARNING: This operation will create s version tag and push to github"
+	@echo "WARNING: This operation will create a version tag and push to github"
 	@read -p "Version? (provide the next x.y.z semver) : " TAG
-	@echo "$${TAG}" > python_project/VERSION
-	@$(ENV_PREFIX)gitchangelog > HISTORY.md
-	@git add python_project/VERSION HISTORY.md
+	@sed -i "s/^version = \".*\"/version = \"$${TAG}\"/" pyproject.toml
+	@$(ENV_PREFIX)python -m gitchangelog > HISTORY.md
+	@git add pyproject.toml HISTORY.md
 	@git commit -m "release: version $${TAG} 🚀"
 	@echo "creating git tag : $${TAG}"
 	@git tag $${TAG}
@@ -90,30 +95,8 @@ release:          ## Create a new tag for release.
 .PHONY: docs
 docs:             ## Build the documentation.
 	@echo "building documentation ..."
-	@$(ENV_PREFIX)mkdocs build
+	@$(ENV_PREFIX)python -m mkdocs build
 	URL="site/index.html"; xdg-open $$URL || sensible-browser $$URL || x-www-browser $$URL || gnome-open $$URL
-
-.PHONY: switch-to-poetry
-switch-to-poetry: ## Switch to poetry package manager.
-	@echo "Switching to poetry ..."
-	@if ! poetry --version > /dev/null; then echo 'poetry is required, install from https://python-poetry.org/'; exit 1; fi
-	@rm -rf .venv
-	@poetry init --no-interaction --name=a_flask_test --author=rochacbruno
-	@echo "" >> pyproject.toml
-	@echo "[tool.poetry.scripts]" >> pyproject.toml
-	@echo "python_project = 'python_project.__main__:main'" >> pyproject.toml
-	@cat requirements.txt | while read in; do poetry add --no-interaction "$${in}"; done
-	@cat requirements-test.txt | while read in; do poetry add --no-interaction "$${in}" --dev; done
-	@poetry install --no-interaction
-	@mkdir -p .github/backup
-	@mv requirements* .github/backup
-	@mv setup.py .github/backup
-	@echo "You have switched to https://python-poetry.org/ package manager."
-	@echo "Please run 'poetry shell' or 'poetry run python_project'"
-
-.PHONY: init
-init:             ## Initialize the project based on an application template.
-	@./.github/init.sh
 
 
 # This project has been generated from rochacbruno/python-project-template

@@ -1,0 +1,45 @@
+(* Fully manual memory management: a singly-linked list built with plain
+   POINTER TO Node, allocated one NEW at a time and torn down with an
+   explicit DISPOSE per node. Nothing here is automatic -- forget a
+   DISPOSE and it leaks, exactly like malloc/free; that directness is the
+   whole point of a plain (non-OWN) pointer.
+*)
+MODULE LinkedList;
+
+TYPE
+  Node = RECORD
+    value: INTEGER;
+    next: POINTER TO Node;
+  END;
+
+VAR
+  head, cur, tmp: POINTER TO Node;
+  i, total: INTEGER;
+
+BEGIN
+  head := NIL;
+  FOR i := 1 TO 5 DO
+    NEW(cur);
+    cur^.value := i * 10;
+    cur^.next := head;
+    head := cur;
+  END;
+
+  total := 0;
+  cur := head;
+  WHILE cur # NIL DO
+    WriteInt(cur^.value);
+    WriteLn;
+    total := total + cur^.value;
+    cur := cur^.next;
+  END;
+  WriteInt(total);
+  WriteLn;
+
+  cur := head;
+  WHILE cur # NIL DO
+    tmp := cur^.next;
+    DISPOSE(cur);
+    cur := tmp;
+  END;
+END LinkedList.
