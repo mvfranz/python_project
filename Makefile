@@ -44,8 +44,15 @@ test: lint        ## Run tests and generate coverage report.
 .PHONY: examples
 examples:         ## Run every example program under examples/.
 	@for f in examples/*.m2p; do \
-		echo "=== $$f ==="; \
-		$(ENV_PREFIX)python -m modplus.cli run "$$f" || exit 1; \
+		case "$$f" in \
+			examples/mathutils.m2p) continue ;; \
+			examples/import_demo.m2p) \
+				echo "=== $$f (+ mathutils.m2p) ==="; \
+				$(ENV_PREFIX)python -m modplus.cli run "$$f" examples/mathutils.m2p || exit 1 ;; \
+			*) \
+				echo "=== $$f ==="; \
+				$(ENV_PREFIX)python -m modplus.cli run "$$f" || exit 1 ;; \
+		esac; \
 	done
 
 .PHONY: watch
