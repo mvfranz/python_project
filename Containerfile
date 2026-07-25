@@ -1,5 +1,6 @@
-FROM python:3.7-alpine
+FROM python:3.11-slim
 COPY . /app
 WORKDIR /app
 RUN pip install .
-CMD ["python_project"]
+ENTRYPOINT ["modplusc"]
+CMD ["run", "examples/hello.m2p"]

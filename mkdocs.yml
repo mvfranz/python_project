@@ -1,2 +1,5 @@
-site_name: python_project
+site_name: modplus
 theme: readthedocs
+nav:
+  - Home: index.md
+  - Language Specification: language_spec.md

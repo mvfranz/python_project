@@ -1,17 +1,17 @@
-# Welcome to MkDocs
+# modplus
 
-For full documentation visit [mkdocs.org](https://www.mkdocs.org).
+A small, strongly-typed systems programming language in the Modula-2
+lineage, compiled to native code through LLVM, with C++-style compile-time
+templates.
 
-## Commands
+Start with the [Language Specification](language_spec.md) for the full
+grammar, type system, generics/monomorphization model, and memory-management
+design, or look at [`examples/`](https://github.com/mvfranz/python_project/tree/main/examples)
+in the repository for runnable programs.
 
-* `mkdocs new [dir-name]` - Create a new project.
-* `mkdocs serve` - Start the live-reloading docs server.
-* `mkdocs build` - Build the documentation site.
-* `mkdocs -h` - Print help message and exit.
+## Quickstart
 
-## Project layout
-
-    mkdocs.yml    # The configuration file.
-    docs/
-        index.md  # The documentation homepage.
-        ...       # Other markdown pages, images and other files.
+```bash
+pip install -e .[test]
+modplusc run examples/hello.m2p
+```

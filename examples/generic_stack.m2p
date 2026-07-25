@@ -1,0 +1,44 @@
+(* A fixed-capacity generic stack, parameterized on both a type (T) and a
+   compile-time constant (N, the capacity) -- like C++'s
+   `std::array<T, N>`. `Stack<INTEGER, 8>` monomorphizes to a RECORD whose
+   `items` field is a genuine `ARRAY[8] OF INTEGER` laid out inline, with
+   no heap allocation and no indirection: the whole stack lives in 8
+   contiguous machine words plus one INTEGER, wherever the caller put it
+   (register/stack/global) -- true zero-cost, cache-friendly generics.
+*)
+MODULE GenericStack;
+
+TYPE
+  Stack<T, N: CONST INTEGER> = RECORD
+    items: ARRAY[N] OF T;
+    top: INTEGER;
+  END;
+
+  IntStack8 = Stack<INTEGER, 8>;
+
+VAR
+  s: IntStack8;
+  i: INTEGER;
+
+PROCEDURE Push(VAR s: IntStack8; v: INTEGER);
+BEGIN
+  s.items[s.top] := v;
+  s.top := s.top + 1;
+END Push;
+
+PROCEDURE Pop(VAR s: IntStack8): INTEGER;
+BEGIN
+  s.top := s.top - 1;
+  RETURN s.items[s.top];
+END Pop;
+
+BEGIN
+  s.top := 0;
+  FOR i := 1 TO 5 DO
+    Push(s, i * i);
+  END;
+  WHILE s.top > 0 DO
+    WriteInt(Pop(s));
+    WriteLn;
+  END;
+END GenericStack.

@@ -1,83 +1,93 @@
+# modplus
 
-# Python Project Template
-
-A low dependency and really simple to start project template for Python Projects.
-
-See also 
-- [Flask-Project-Template](https://github.com/rochacbruno/flask-project-template/) for a full feature Flask project including database, API, admin interface, etc.
-- [FastAPI-Project-Template](https://github.com/rochacbruno/fastapi-project-template/) The base to start an openapi project featuring: SQLModel, Typer, FastAPI, JWT Token Auth, Interactive Shell, Management Commands.
-
-### HOW TO USE THIS TEMPLATE
-
-> **DO NOT FORK** this is meant to be used from **[Use this template](https://github.com/rochacbruno/python-project-template/generate)** feature.
-
-1. Click on **[Use this template](https://github.com/rochacbruno/python-project-template/generate)**
-3. Give a name to your project  
-   (e.g. `my_awesome_project` recommendation is to use all lowercase and underscores separation for repo names.)
-3. Wait until the first run of CI finishes  
-   (Github Actions will process the template and commit to your new repo)
-4. If you want [codecov](https://about.codecov.io/sign-up/) Reports and Automatic Release to [PyPI](https://pypi.org)  
-  On the new repository `settings->secrets` add your `PYPI_API_TOKEN` and `CODECOV_TOKEN` (get the tokens on respective websites)
-4. Read the file [CONTRIBUTING.md](CONTRIBUTING.md)
-5. Then clone your new project and happy coding!
-
-> **NOTE**: **WAIT** until first CI run on github actions before cloning your new project.
-
-### What is included on this template?
-
-- 🖼️ Templates for starting multiple application types:
-  * **Basic low dependency** Python program (default) [use this template](https://github.com/rochacbruno/python-project-template/generate)
-  * **Flask** with database, admin interface, restapi and authentication [use this template](https://github.com/rochacbruno/flask-project-template/generate).
-  **or Run `make init` after cloning to generate a new project based on a template.**
-- 📦 A basic [setup.py](setup.py) file to provide installation, packaging and distribution for your project.  
-  Template uses setuptools because it's the de-facto standard for Python packages, you can run `make switch-to-poetry` later if you want.
-- 🤖 A [Makefile](Makefile) with the most useful commands to install, test, lint, format and release your project.
-- 📃 Documentation structure using [mkdocs](http://www.mkdocs.org)
-- 💬 Auto generation of change log using **gitchangelog** to keep a HISTORY.md file automatically based on your commit history on every release.
-- 🐋 A simple [Containerfile](Containerfile) to build a container image for your project.  
-  `Containerfile` is a more open standard for building container images than Dockerfile, you can use buildah or docker with this file.
-- 🧪 Testing structure using [pytest](https://docs.pytest.org/en/latest/)
-- ✅ Code linting using [flake8](https://flake8.pycqa.org/en/latest/)
-- 📊 Code coverage reports using [codecov](https://about.codecov.io/sign-up/)
-- 🛳️ Automatic release to [PyPI](https://pypi.org) using [twine](https://twine.readthedocs.io/en/latest/) and github actions.
-- 🎯 Entry points to execute your program using `python -m <python_project>` or `$ python_project` with basic CLI argument parsing.
-- 🔄 Continuous integration using [Github Actions](.github/workflows/) with jobs to lint, test and release your project on Linux, Mac and Windows environments.
-
-> Curious about architectural decisions on this template? read [ABOUT_THIS_TEMPLATE.md](ABOUT_THIS_TEMPLATE.md)  
-> If you want to contribute to this template please open an [issue](https://github.com/rochacbruno/python-project-template/issues) or fork and send a PULL REQUEST.
-
-[❤️ Sponsor this project](https://github.com/sponsors/rochacbruno/)
-
-<!--  DELETE THE LINES ABOVE THIS AND WRITE YOUR PROJECT README BELOW -->
-
----
-# python_project
-
-[![codecov](https://codecov.io/gh/mvfranz/python_project/branch/main/graph/badge.svg?token=python_project_token_here)](https://codecov.io/gh/mvfranz/python_project)
 [![CI](https://github.com/mvfranz/python_project/actions/workflows/main.yml/badge.svg)](https://github.com/mvfranz/python_project/actions/workflows/main.yml)
 
-Awesome python_project created by mvfranz
+**modplus** is a small, strongly-typed systems programming language in the
+Modula-2 lineage, compiled to native code through [LLVM](https://llvm.org/)
+(via [llvmlite](https://github.com/numba/llvmlite)). It adds C++-style
+compile-time templates on top of Modula-2's syntax and philosophy, while
+keeping memory management fully manual (or scope-bound, your choice) and
+scoping simple and explicit.
 
-## Install it from PyPI
+```modula2
+MODULE GenericsMax;
+
+GENERIC PROCEDURE Max<T>(a, b: T): T;
+BEGIN
+  IF a > b THEN
+    RETURN a;
+  ELSE
+    RETURN b;
+  END;
+END Max;
+
+VAR i: INTEGER; r: REAL;
+
+BEGIN
+  i := Max<INTEGER>(7, 3);   (* monomorphized: a dedicated Max$INTEGER *)
+  r := Max(2.5, 9.75);       (* type argument deduced as REAL *)
+  WriteInt(i); WriteLn;
+  WriteReal(r); WriteLn;
+END GenericsMax.
+```
+
+See [`examples/`](examples/) for more (generics with non-type parameters,
+manual `NEW`/`DISPOSE` linked lists, and `OWN` pointers), and
+[`docs/language_spec.md`](docs/language_spec.md) for the full language
+reference and the design rationale behind each feature.
+
+## Design goals
+
+- **Strongly, statically typed.** Nominal types, no implicit numeric
+  coercion (not even `INTEGER`↔`REAL`) -- conversions are explicit
+  (`FLOAT`, `TRUNC`, `ORD`, `CHR`).
+- **Zero-cost, cache-friendly generics.** `GENERIC PROCEDURE`/`TYPE<...>`
+  templates are monomorphized at compile time -- each instantiation is a
+  distinct LLVM function/struct with no runtime type tag, vtable, or
+  indirection, same cost model as C++ templates. Explicit specialization
+  (`PROCEDURE Max<INTEGER>(...)`) lets you override the template for a
+  specific instantiation.
+- **Value types are inline.** `RECORD` and `ARRAY` are never boxed; they
+  live directly in locals, struct fields, or array elements, contiguous in
+  memory.
+- **Simple, explicit scoping.** Two levels only -- module and procedure.
+  Nested procedures don't capture outer locals, so there is never a
+  hidden closure to reason about.
+- **Manual memory management, with a safety valve.** `POINTER TO T` is
+  fully manual (`NEW`/`DISPOSE`, can leak or dangle, same as C).
+  `OWN POINTER TO T` is scope-bound: the compiler inserts the matching
+  `free()` on every path out of its declaring scope, and manually calling
+  `DISPOSE` on one is a compile error.
+
+## Install
+
+Requires Python 3.11+.
 
 ```bash
-pip install python_project
+pip install -e .[test]
 ```
 
 ## Usage
 
-```py
-from python_project import BaseClass
-from python_project import base_function
-
-BaseClass().base_method()
-base_function()
+```bash
+modplusc run examples/hello.m2p          # JIT-compile and execute
+modplusc emit-llvm examples/hello.m2p     # print LLVM IR
+modplusc emit-object examples/hello.m2p -o hello.o   # native object file
 ```
 
 ```bash
-$ python -m python_project
-#or
-$ python_project
+$ make examples   # run every example program
+$ make test       # lint (ruff + mypy) and run the test suite
+```
+
+## Project layout
+
+```text
+src/modplus/     the compiler: lexer, parser, sema (type-check + generics
+                 monomorphization), codegen (llvmlite/LLVM IR), CLI, JIT
+examples/        example .m2p programs
+tests/           pytest suite (unit tests + end-to-end JIT execution)
+docs/            language specification and design rationale
 ```
 
 ## Development

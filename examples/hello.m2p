@@ -1,0 +1,40 @@
+(* A tour of the basics: variables, RECORD/ARRAY value types, IF/WHILE/FOR,
+   and the console-output builtins. Run with:
+     modplusc examples/hello.m2p run
+*)
+MODULE Hello;
+
+TYPE
+  Point = RECORD
+    x, y: INTEGER;
+  END;
+
+VAR
+  p: Point;
+  squares: ARRAY[5] OF INTEGER;
+  i, total: INTEGER;
+
+PROCEDURE Distance2(a: Point): INTEGER;
+BEGIN
+  RETURN a.x * a.x + a.y * a.y;
+END Distance2;
+
+BEGIN
+  p.x := 3;
+  p.y := 4;
+  WriteInt(Distance2(p));
+  WriteLn;
+
+  FOR i := 0 TO 4 DO
+    squares[i] := (i + 1) * (i + 1);
+  END;
+
+  total := 0;
+  i := 0;
+  WHILE i < 5 DO
+    total := total + squares[i];
+    i := i + 1;
+  END;
+  WriteInt(total);
+  WriteLn;
+END Hello.
