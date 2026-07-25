@@ -53,6 +53,7 @@ class Codegen:
         self.printf_fn = ir.Function(
             self.module, ir.FunctionType(I32, [I8P], var_arg=True), "printf"
         )
+        self.fflush_fn = ir.Function(self.module, ir.FunctionType(I32, [I8P]), "fflush")
         self._string_cache: dict[str, ir.GlobalVariable] = {}
         self._string_counter = 0
 
@@ -168,6 +169,12 @@ class Codegen:
         self.gen_stmts(program.module.body, program.module_scope, None)
         if not self.builder.block.is_terminated:
             self.emit_own_cleanup(program.module_scope)
+            # The JIT path calls `main` in-process via ctypes rather than
+            # through a real process exit, so libc's normal atexit-time
+            # stdio flush never happens on its own -- without this,
+            # buffered `printf` output from WriteInt/WriteLn/etc can sit
+            # unflushed and simply never reach the caller's stdout.
+            self.builder.call(self.fflush_fn, [ir.Constant(I8P, None)])
             self.builder.ret(ir.Constant(I32, 0))
 
     def emit_own_cleanup(self, scope: Scope) -> None:
