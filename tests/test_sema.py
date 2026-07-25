@@ -40,7 +40,7 @@ def test_float_and_trunc_conversions_are_required():
         END M.
         """
     )
-    assert prog.module.name == "M"
+    assert prog.main_module == "M"
 
 
 def test_undeclared_identifier():
@@ -224,7 +224,7 @@ def test_generic_instantiation_produces_distinct_mangled_names():
         """
     )
     names = sorted(inst.mangled_name for inst in prog.proc_instances)
-    assert names == ["Id$INTEGER", "Id$REAL"]
+    assert names == ["M$Id$INTEGER", "M$Id$REAL"]
 
 
 def test_specialization_is_used_instead_of_template():
@@ -246,7 +246,7 @@ def test_specialization_is_used_instead_of_template():
         """
     )
     (inst,) = prog.proc_instances
-    assert inst.mangled_name == "Choose$INTEGER"
+    assert inst.mangled_name == "M$Choose$INTEGER"
     # the specialization's body ("RETURN b") was used, not the template's.
     ret_stmt = inst.decl.body[0]
     assert ret_stmt.value.name == "b"
@@ -266,7 +266,7 @@ def test_generic_record_with_non_type_param():
         END M.
         """
     )
-    sym = prog.module_scope.lookup("b")
+    sym = prog.module_scopes[prog.main_module].lookup("b")
     assert isinstance(sym.type, types.RecordType)
     assert sym.type.fields[0].type == types.ArrayType(types.INTEGER, 4)
 

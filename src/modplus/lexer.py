@@ -9,6 +9,7 @@ from .errors import LexError, SourcePos
 
 KEYWORDS = {
     "MODULE",
+    "IMPORT",
     "BEGIN",
     "END",
     "CONST",

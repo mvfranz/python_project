@@ -44,14 +44,33 @@ class TypeSymbol(Symbol):
 
 class VarSymbol(Symbol):
     """Also doubles as codegen's storage slot: `llvm_ptr` is filled in by
-    codegen.py once the alloca/param slot has been emitted."""
+    codegen.py once the alloca/param slot has been emitted.
 
-    def __init__(self, name: str, type_: Type, by_ref: bool, owning: bool) -> None:
+    `mangled_name` is the actual LLVM symbol name for module-level globals
+    (module-qualified, e.g. "Foo$x", so two modules can each declare a `x`
+    without colliding) -- for a procedure's params/locals it's just `name`
+    again, since those only ever become function-local allocas, which
+    llvmlite disambiguates on its own and never share a process-wide
+    namespace with anything else."""
+
+    def __init__(
+        self, name: str, type_: Type, by_ref: bool, owning: bool, mangled_name: str
+    ) -> None:
         super().__init__(name)
         self.type = type_
         self.by_ref = by_ref
         self.owning = owning
+        self.mangled_name = mangled_name
         self.llvm_ptr = None
+
+
+class ImportedModuleSymbol(Symbol):
+    """A marker declared into a module's scope for each name in its
+    `IMPORT` list -- occupying the same flat namespace as everything else
+    so `_check_name_free`/`Scope.declare` catch a local CONST/TYPE/VAR/
+    PROCEDURE that collides with an imported module name for free, and so
+    a qualified reference (`Foo.Bar`) used inside a nested procedure scope
+    resolves by walking the normal scope chain up to the module scope."""
 
 
 class ProcSymbol(Symbol):

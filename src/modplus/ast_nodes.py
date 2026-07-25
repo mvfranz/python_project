@@ -159,6 +159,9 @@ class Call(Expr):
     type_args: list[TypeArg] | None
     args: list[Expr]
     pos: SourcePos
+    # Set only for a qualified call to an imported module's procedure,
+    # e.g. `Foo.Bar(...)` -> qualifier="Foo", name="Bar".
+    qualifier: str | None = None
     # The remaining fields are resolved by sema.py, once it has picked the
     # builtin/generic-instantiation/ordinary-procedure dispatch for this
     # call; codegen.py trusts them rather than re-deriving the same
@@ -325,8 +328,15 @@ class VarDecl:
 
 
 @dataclass
+class ImportedName:
+    name: str
+    pos: SourcePos
+
+
+@dataclass
 class Module:
     name: str
+    imports: list[ImportedName]
     consts: list[ConstDecl]
     types: list[TypeDecl]
     vars: list[VarDecl]

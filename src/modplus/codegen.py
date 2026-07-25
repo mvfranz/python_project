@@ -23,7 +23,7 @@ from . import ast_nodes as A
 from . import types
 from .errors import CodegenError
 from .sema import AnalyzedProgram, ProcInstance
-from .symbols import ConstSymbol, Scope, VarSymbol
+from .symbols import ConstSymbol, ImportedModuleSymbol, Scope, Symbol, VarSymbol
 
 I64 = ir.IntType(64)
 I32 = ir.IntType(32)
@@ -56,16 +56,19 @@ class Codegen:
         self.fflush_fn = ir.Function(self.module, ir.FunctionType(I32, [I8P]), "fflush")
         self._string_cache: dict[str, ir.GlobalVariable] = {}
         self._string_counter = 0
+        self.program: AnalyzedProgram | None = None
 
     # -- entry point -----------------------------------------------------
 
     def generate(self, program: AnalyzedProgram) -> ir.Module:
-        for sym in program.module_scope.symbols.values():
-            if isinstance(sym, VarSymbol):
-                gv = ir.GlobalVariable(self.module, self.llvm_type(sym.type), sym.name)
-                gv.linkage = "internal"
-                gv.initializer = ir.Constant(self.llvm_type(sym.type), None)
-                sym.llvm_ptr = gv
+        self.program = program
+        for module_name in program.modules_in_order:
+            for sym in program.module_scopes[module_name].symbols.values():
+                if isinstance(sym, VarSymbol):
+                    gv = ir.GlobalVariable(self.module, self.llvm_type(sym.type), sym.mangled_name)
+                    gv.linkage = "internal"
+                    gv.initializer = ir.Constant(self.llvm_type(sym.type), None)
+                    sym.llvm_ptr = gv
 
         for inst in program.proc_instances:
             fnty = self._function_type(inst)
@@ -160,22 +163,43 @@ class Codegen:
                 assert isinstance(sym, VarSymbol)
                 sym.llvm_ptr = self.builder.alloca(self.llvm_type(sym.type), name=n)
 
+    def _gen_module_init(self, module_name: str, program: AnalyzedProgram) -> ir.Function:
+        """Every module -- imported or main -- gets its own `{name}$init`
+        function holding its BEGIN...END body. `_gen_main` below calls all
+        of them in dependency order (imports before importers) so an
+        imported module's initialization always runs before anything that
+        depends on it, then main's `$init` runs last -- that one plays the
+        role of "the program" the same way it would if there were no
+        other modules at all."""
+        fnty = ir.FunctionType(ir.VoidType(), [])
+        fn = ir.Function(self.module, fnty, f"{module_name}$init")
+        self.func = fn
+        block = fn.append_basic_block("entry")
+        self.builder = ir.IRBuilder(block)
+        scope = program.module_scopes[module_name]
+        self.gen_stmts(program.module_bodies[module_name], scope, None)
+        if not self.builder.block.is_terminated:
+            self.emit_own_cleanup(scope)
+            self.builder.ret_void()
+        return fn
+
     def _gen_main(self, program: AnalyzedProgram) -> None:
+        init_fns = [self._gen_module_init(name, program) for name in program.modules_in_order]
+
         fnty = ir.FunctionType(I32, [])
         fn = ir.Function(self.module, fnty, "main")
         self.func = fn
         block = fn.append_basic_block("entry")
         self.builder = ir.IRBuilder(block)
-        self.gen_stmts(program.module.body, program.module_scope, None)
-        if not self.builder.block.is_terminated:
-            self.emit_own_cleanup(program.module_scope)
-            # The JIT path calls `main` in-process via ctypes rather than
-            # through a real process exit, so libc's normal atexit-time
-            # stdio flush never happens on its own -- without this,
-            # buffered `printf` output from WriteInt/WriteLn/etc can sit
-            # unflushed and simply never reach the caller's stdout.
-            self.builder.call(self.fflush_fn, [ir.Constant(I8P, None)])
-            self.builder.ret(ir.Constant(I32, 0))
+        for init_fn in init_fns:
+            self.builder.call(init_fn, [])
+        # The JIT path calls `main` in-process via ctypes rather than
+        # through a real process exit, so libc's normal atexit-time
+        # stdio flush never happens on its own -- without this,
+        # buffered `printf` output from WriteInt/WriteLn/etc can sit
+        # unflushed and simply never reach the caller's stdout.
+        self.builder.call(self.fflush_fn, [ir.Constant(I8P, None)])
+        self.builder.ret(ir.Constant(I32, 0))
 
     def emit_own_cleanup(self, scope: Scope) -> None:
         assert self.builder is not None
@@ -316,13 +340,32 @@ class Codegen:
 
     # -- designators (addresses) ------------------------------------------
 
+    def _resolve_designator_base(
+        self, name: str, parts: list[A.DesignatorPart], scope: Scope
+    ) -> tuple[Symbol, list[A.DesignatorPart]]:
+        """Mirrors sema.py's `_resolve_designator_base`: steps through one
+        level of module qualification (`Foo.Bar`) if `name` is an imported
+        module rather than an ordinary local/global symbol. Sema already
+        validated all of this, so codegen just needs to reproduce the same
+        resolution to find the right storage -- there's nothing left to
+        reject here."""
+        sym = scope.lookup(name)
+        assert sym is not None
+        if not isinstance(sym, ImportedModuleSymbol):
+            return sym, parts
+        assert self.program is not None
+        member = parts[0]
+        assert isinstance(member, A.FieldAccess)
+        member_sym = self.program.module_scopes[name].symbols[member.name]
+        return member_sym, parts[1:]
+
     def gen_designator_address(self, d: A.Designator, scope: Scope) -> tuple[ir.Value, types.Type]:
         assert self.builder is not None
-        sym = scope.lookup(d.name)
+        sym, parts = self._resolve_designator_base(d.name, d.parts, scope)
         assert isinstance(sym, VarSymbol), f"'{d.name}' is not addressable"
         addr = sym.llvm_ptr
         t = sym.type
-        for part in d.parts:
+        for part in parts:
             if isinstance(part, A.FieldAccess):
                 assert isinstance(t, types.RecordType)
                 f = t.field(part.name)
@@ -355,9 +398,9 @@ class Codegen:
     def gen_expr(self, expr: A.Expr, scope: Scope) -> ir.Value:
         assert self.builder is not None
         if isinstance(expr, A.Designator):
-            base_sym = scope.lookup(expr.name)
-            if isinstance(base_sym, ConstSymbol) and not expr.parts:
-                return self._gen_const_value(base_sym.type, base_sym.value)
+            sym, parts = self._resolve_designator_base(expr.name, expr.parts, scope)
+            if isinstance(sym, ConstSymbol) and not parts:
+                return self._gen_const_value(sym.type, sym.value)
             addr, _t = self.gen_designator_address(expr, scope)
             return self.builder.load(addr)
         if isinstance(expr, A.IntLit):

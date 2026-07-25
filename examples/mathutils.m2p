@@ -1,0 +1,32 @@
+(* A small library module: no MODULE that imports this one needs to know
+   its internals, only what it exports -- every top-level CONST/TYPE/VAR/
+   PROCEDURE here is automatically visible to an importer as
+   `MathUtils.Whatever`. Its own BEGIN...END body (below) is initialization
+   code that runs once, before the importing module's body, in dependency
+   order -- see import_demo.m2p.
+*)
+MODULE MathUtils;
+
+CONST
+  Limit = 100;
+
+VAR
+  CallCount: INTEGER;
+
+PROCEDURE Square(x: INTEGER): INTEGER;
+BEGIN
+  CallCount := CallCount + 1;
+  RETURN x * x;
+END Square;
+
+PROCEDURE Clamp(x: INTEGER): INTEGER;
+BEGIN
+  IF x > Limit THEN
+    RETURN Limit;
+  END;
+  RETURN x;
+END Clamp;
+
+BEGIN
+  CallCount := 0;
+END MathUtils.

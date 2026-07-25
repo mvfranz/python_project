@@ -30,7 +30,15 @@ from typing import Any
 from . import ast_nodes as A
 from . import types
 from .errors import SemaError, SourcePos
-from .symbols import ConstSymbol, ProcSymbol, Scope, TypeSymbol, VarSymbol
+from .symbols import (
+    ConstSymbol,
+    ImportedModuleSymbol,
+    ProcSymbol,
+    Scope,
+    Symbol,
+    TypeSymbol,
+    VarSymbol,
+)
 
 BUILTIN_CONVERSIONS: dict[str, tuple[types.Type, types.Type]] = {
     "FLOAT": (types.INTEGER, types.REAL),
@@ -81,25 +89,67 @@ class ProcInstance:
 
 @dataclass
 class AnalyzedProgram:
-    module: A.Module
-    module_scope: Scope
+    modules_in_order: list[str]  # dependency order: imports before importers, main last
+    module_scopes: dict[str, Scope]
+    module_bodies: dict[str, list[A.Stmt]]
     proc_instances: list[ProcInstance]
+    main_module: str
 
 
 class Analyzer:
+    """Analyzes one module at a time (`analyze_module`), in dependency
+    order, accumulating cross-module state (`modules`, `module_bodies`,
+    `codegen_queue`) across the calls. Everything specific to a single
+    module's own declarations (its scope, its generic template/instance
+    caches, its anonymous-type counter) is reset at the top of each
+    `analyze_module` call -- generics are not (yet) importable, so there
+    is no reason for two modules' template caches to ever interact; see
+    `docs/language_spec.md`."""
+
     def __init__(self) -> None:
+        self.modules: dict[str, Scope] = {}
+        self.module_bodies: dict[str, list[A.Stmt]] = {}
+        self.codegen_queue: list[ProcInstance] = []
+
+        self.current_module = ""
         self.module_scope: Scope = Scope(None, "module")
         self.generic_proc_templates: dict[str, A.ProcDecl] = {}
         self.proc_specializations: dict[tuple, A.ProcDecl] = {}
         self.proc_instances: dict[tuple, ProcInstance] = {}
         self.generic_type_templates: dict[str, A.TypeDecl] = {}
         self.type_instances: dict[tuple, types.Type] = {}
-        self.codegen_queue: list[ProcInstance] = []
         self._anon_counter = 0
 
     # -- top level -------------------------------------------------------
 
-    def run(self, module: A.Module) -> AnalyzedProgram:
+    def analyze_module(self, module: A.Module) -> None:
+        self.current_module = module.name
+        self.module_scope = Scope(None, "module")
+        self.modules[module.name] = self.module_scope
+        self.generic_proc_templates = {}
+        self.proc_specializations = {}
+        self.proc_instances = {}
+        self.generic_type_templates = {}
+        self.type_instances = {}
+        self._anon_counter = 0
+
+        for imp in module.imports:
+            if imp.name == module.name:
+                # Unreachable via analyze_program(): _order_modules's cycle
+                # detection catches a self-import first, as a 1-node cycle.
+                # Kept as a defensive check for `analyze_module` called
+                # directly, outside that orchestration.
+                raise SemaError(  # pragma: no cover
+                    f"module '{module.name}' cannot IMPORT itself", imp.pos
+                )
+            if imp.name not in self.modules:
+                raise SemaError(  # pragma: no cover - caught earlier by _order_modules
+                    f"module '{imp.name}' must be analyzed before '{module.name}' imports it",
+                    imp.pos,
+                )
+            self._check_name_free(imp.name, imp.pos)
+            self.module_scope.declare(ImportedModuleSymbol(imp.name), imp.pos)
+
         for cd in module.consts:
             t, v = self.eval_const_expr(cd.value, self.module_scope)
             self._check_name_free(cd.name, cd.pos)
@@ -111,7 +161,7 @@ class Analyzer:
             if td.is_generic:
                 self.generic_type_templates[td.name] = td
             elif isinstance(td.type, A.RecordType):
-                placeholder = types.RecordType(td.name)
+                placeholder = types.RecordType(self._qualify(td.name))
                 record_placeholders[td.name] = placeholder
                 self.module_scope.declare(TypeSymbol(td.name, placeholder), td.pos)
 
@@ -123,7 +173,9 @@ class Analyzer:
                 assert isinstance(td.type, A.RecordType)
                 self._resolve_record_fields(td.type, self.module_scope, placeholder)
             else:
-                t = self.resolve_type_expr(td.type, self.module_scope, name_hint=td.name)
+                t = self.resolve_type_expr(
+                    td.type, self.module_scope, name_hint=self._qualify(td.name)
+                )
                 self.module_scope.declare(TypeSymbol(td.name, t), td.pos)
 
         for vd in module.vars:
@@ -131,7 +183,7 @@ class Analyzer:
             for n in vd.names:
                 self._check_name_free(n, vd.pos)
                 owning = isinstance(t, types.PointerType) and t.owning
-                self.module_scope.declare(VarSymbol(n, t, False, owning), vd.pos)
+                self.module_scope.declare(VarSymbol(n, t, False, owning, self._qualify(n)), vd.pos)
 
         # Pass 1: register every ordinary procedure's signature (and every
         # generic template, unanalyzed) so calls resolve regardless of the
@@ -152,7 +204,10 @@ class Analyzer:
                 param_types, param_by_ref = self._signature_params(pd.params, self.module_scope)
                 ret_type = self._resolve_ret_type(pd.ret_type, self.module_scope, pd.pos)
                 self.module_scope.declare(
-                    ProcSymbol(pd.name, param_types, param_by_ref, ret_type, pd.name), pd.pos
+                    ProcSymbol(
+                        pd.name, param_types, param_by_ref, ret_type, self._qualify(pd.name)
+                    ),
+                    pd.pos,
                 )
 
         # Pass 1.5: bake explicit specializations in before any generic call
@@ -179,7 +234,7 @@ class Analyzer:
             if key in self.proc_specializations:
                 raise SemaError(f"duplicate specialization of '{pd.name}'", pd.pos)
             self.proc_specializations[key] = pd
-            mangled = self._mangle("proc", pd.name, resolved_args)
+            mangled = self._mangle(pd.name, resolved_args)
             self._build_instance(pd, self.module_scope, mangled, cache=(self.proc_instances, key))
 
         # Pass 2: analyze ordinary procedure bodies. Generic templates are
@@ -192,8 +247,10 @@ class Analyzer:
             self._build_instance(pd, self.module_scope, sym.mangled_name)
 
         self._analyze_stmts(module.body, self.module_scope, ret_type=None, allow_return=False)
+        self.module_bodies[module.name] = module.body
 
-        return AnalyzedProgram(module, self.module_scope, self.codegen_queue)
+    def _qualify(self, name: str) -> str:
+        return f"{self.current_module}${name}"
 
     def _check_name_free(self, name: str, pos: SourcePos) -> None:
         if (
@@ -248,7 +305,7 @@ class Analyzer:
             if isinstance(t, types.PointerType) and t.owning:
                 raise SemaError("OWN pointer types cannot be used as parameters", p.pos)
             for n in p.names:
-                proc_scope.declare(VarSymbol(n, t, p.by_ref, owning=False), p.pos)
+                proc_scope.declare(VarSymbol(n, t, p.by_ref, owning=False, mangled_name=n), p.pos)
                 param_types.append(t)
                 param_by_ref.append(p.by_ref)
         return param_types, param_by_ref
@@ -258,13 +315,19 @@ class Analyzer:
             t, v = self.eval_const_expr(cd.value, proc_scope)
             proc_scope.declare(ConstSymbol(cd.name, t, v), cd.pos)
         for td in pd.types:
-            t = self.resolve_type_expr(td.type, proc_scope, name_hint=td.name)
+            # Qualified by module *and* procedure name: LLVM's identified
+            # struct namespace is process-wide, so two different
+            # procedures (in the same or different modules) each
+            # declaring their own local `TYPE Point = RECORD ... END`
+            # would otherwise collide.
+            name_hint = f"{self.current_module}${pd.name}${td.name}"
+            t = self.resolve_type_expr(td.type, proc_scope, name_hint=name_hint)
             proc_scope.declare(TypeSymbol(td.name, t), td.pos)
         for vd in pd.vars:
             t = self.resolve_type_expr(vd.type, proc_scope)
             for n in vd.names:
                 owning = isinstance(t, types.PointerType) and t.owning
-                proc_scope.declare(VarSymbol(n, t, False, owning), vd.pos)
+                proc_scope.declare(VarSymbol(n, t, False, owning, mangled_name=n), vd.pos)
 
     def _build_instance(
         self,
@@ -302,7 +365,7 @@ class Analyzer:
                 pos,
             )
         subst_scope = self._make_subst_scope(template.type_params, type_args, pos)
-        mangled_name = self._mangle("proc", name, type_args)
+        mangled_name = self._mangle(name, type_args)
         decl_copy = copy.deepcopy(template)
         return self._build_instance(
             decl_copy, subst_scope, mangled_name, cache=(self.proc_instances, key)
@@ -323,7 +386,7 @@ class Analyzer:
                 pos,
             )
         subst_scope = self._make_subst_scope(template.type_params, type_args, pos)
-        mangled_name = self._mangle("type", name, type_args)
+        mangled_name = self._mangle(name, type_args)
         t = self.resolve_type_expr(template.type, subst_scope, name_hint=mangled_name)
         self.type_instances[key] = t
         return t
@@ -345,8 +408,9 @@ class Analyzer:
                 subst_scope.declare(TypeSymbol(tp.name, arg), tp.pos)
         return subst_scope
 
-    def _mangle(self, kind: str, name: str, args: list) -> str:
-        return name + "".join("$" + self._mangle_value(a) for a in args)
+    def _mangle(self, name: str, args: list) -> str:
+        qualified = self._qualify(name)
+        return qualified + "".join("$" + self._mangle_value(a) for a in args)
 
     def _mangle_value(self, v: object) -> str:
         if isinstance(v, bool):
@@ -373,7 +437,7 @@ class Analyzer:
 
     def _anon_name(self) -> str:
         self._anon_counter += 1
-        return f"$anon{self._anon_counter}"
+        return self._qualify(f"anon{self._anon_counter}")
 
     def _resolve_record_fields(
         self, node: A.RecordType, scope: Scope, rt: types.RecordType
@@ -463,9 +527,9 @@ class Analyzer:
         if isinstance(expr, A.CharLit):
             return types.CHAR, expr.value
         if isinstance(expr, A.Designator):
-            if expr.parts:
+            sym, parts = self._resolve_designator_base(expr.name, expr.parts, scope, expr.pos)
+            if parts:
                 raise SemaError("expected a constant expression", expr.pos)
-            sym = scope.lookup_required(expr.name, expr.pos)
             if not isinstance(sym, ConstSymbol):
                 raise SemaError(f"'{expr.name}' is not a constant", expr.pos)
             return sym.type, sym.value
@@ -663,17 +727,42 @@ class Analyzer:
             return call_t
         raise SemaError("unsupported expression", expr.pos)  # pragma: no cover
 
+    def _resolve_designator_base(
+        self, name: str, parts: list[A.DesignatorPart], scope: Scope, pos: SourcePos
+    ) -> tuple[Symbol, list[A.DesignatorPart]]:
+        """Resolves a designator's leading identifier, transparently
+        stepping through one level of module qualification (`Foo.Bar`) if
+        `name` turns out to be an imported module rather than an ordinary
+        CONST/VAR -- the parser can't tell those apart on its own (see
+        parser.py's comment on the same ambiguity for calls), so this is
+        where `Foo.Bar` actually becomes "look up Bar in Foo's scope"
+        instead of "field access .Bar on the value of Foo". Returns the
+        symbol to actually use plus whichever designator parts remain to
+        be walked normally (field/index/deref) after that resolution."""
+        sym = scope.lookup_required(name, pos)
+        if not isinstance(sym, ImportedModuleSymbol):
+            return sym, parts
+        if not parts or not isinstance(parts[0], A.FieldAccess):
+            raise SemaError(
+                f"module '{name}' must be qualified with '.', e.g. '{name}.Something'", pos
+            )
+        member = parts[0]
+        member_sym = self.modules[name].symbols.get(member.name)
+        if member_sym is None:
+            raise SemaError(f"module '{name}' has no exported member '{member.name}'", member.pos)
+        return member_sym, parts[1:]
+
     def _infer_designator(self, d: A.Designator, scope: Scope) -> types.Type:
-        sym = scope.lookup_required(d.name, d.pos)
+        sym, parts = self._resolve_designator_base(d.name, d.parts, scope, d.pos)
         if isinstance(sym, ConstSymbol):
-            if d.parts:
+            if parts:
                 raise SemaError("cannot use '.', '[]', or '^' on a constant", d.pos)
             d.resolved_type = sym.type
             return sym.type
         if not isinstance(sym, VarSymbol):
             raise SemaError(f"'{d.name}' is not a variable", d.pos)
         t: types.Type = sym.type
-        for part in d.parts:
+        for part in parts:
             if isinstance(part, A.FieldAccess):
                 if not isinstance(t, types.RecordType):
                     raise SemaError(f"'.{part.name}' requires a RECORD value", part.pos)
@@ -774,7 +863,7 @@ class Analyzer:
             if by_ref:
                 if not isinstance(arg, A.Designator):
                     raise SemaError("a VAR parameter requires a variable argument", arg.pos)
-                base_sym = scope.lookup(arg.name)
+                base_sym, _ = self._resolve_designator_base(arg.name, arg.parts, scope, arg.pos)
                 if not isinstance(base_sym, VarSymbol):
                     raise SemaError(
                         "a VAR parameter requires a variable argument, not a constant", arg.pos
@@ -818,6 +907,9 @@ class Analyzer:
         return [bindings[tp.name] for tp in template.type_params]
 
     def _analyze_call(self, call: A.Call, scope: Scope) -> types.Type | None:
+        if call.qualifier is not None:
+            return self._analyze_qualified_call(call, scope)
+
         name = call.name
 
         if name in BUILTIN_VOID_PROCS:
@@ -889,6 +981,98 @@ class Analyzer:
         call.resolved_param_types = sym.param_types
         return sym.ret_type
 
+    def _analyze_qualified_call(self, call: A.Call, scope: Scope) -> types.Type | None:
+        assert call.qualifier is not None
+        qualifier_sym = scope.lookup(call.qualifier)
+        if not isinstance(qualifier_sym, ImportedModuleSymbol):
+            raise SemaError(f"'{call.qualifier}' is not an imported module", call.pos)
+        member_sym = self.modules[call.qualifier].symbols.get(call.name)
+        if member_sym is None:
+            raise SemaError(
+                f"module '{call.qualifier}' has no exported procedure '{call.name}'", call.pos
+            )
+        if not isinstance(member_sym, ProcSymbol):
+            raise SemaError(f"'{call.qualifier}.{call.name}' is not a procedure", call.pos)
+        if call.type_args is not None:
+            raise SemaError(
+                "generic procedures cannot (yet) be imported, so a qualified call "
+                "cannot take template arguments",
+                call.pos,
+            )
+        self._check_call_args(call, member_sym.param_types, member_sym.param_by_ref, scope)
+        call.resolved_mangled_name = member_sym.mangled_name
+        call.resolved_param_by_ref = member_sym.param_by_ref
+        call.resolved_param_types = member_sym.param_types
+        return member_sym.ret_type
+
+
+def _order_modules(parsed_modules: list[A.Module]) -> list[A.Module]:
+    """Topologically sorts `parsed_modules` (imports before importers, the
+    main module -- always `parsed_modules[0]` -- last), validating along
+    the way that every IMPORTed name was actually provided, that no two
+    given modules share a name, that there's no import cycle, and that
+    every provided module is actually reachable from main (an unused file
+    on the command line is far more likely a typo than an intentional
+    no-op)."""
+    by_name: dict[str, A.Module] = {}
+    for m in parsed_modules:
+        if m.name in by_name:
+            raise SemaError(f"module '{m.name}' is defined more than once", m.pos)
+        by_name[m.name] = m
+
+    main_name = parsed_modules[0].name
+    order: list[A.Module] = []
+    visited: set[str] = set()
+    visiting: list[str] = []
+
+    def visit(name: str, pos: SourcePos) -> None:
+        if name in visited:
+            return
+        if name in visiting:
+            cycle = " -> ".join([*visiting[visiting.index(name) :], name])
+            raise SemaError(f"circular IMPORT: {cycle}", pos)
+        m = by_name.get(name)
+        if m is None:
+            raise SemaError(
+                f"module '{name}' is imported but its source file was not given "
+                "on the command line",
+                pos,
+            )
+        visiting.append(name)
+        for imp in m.imports:
+            visit(imp.name, imp.pos)
+        visiting.pop()
+        visited.add(name)
+        order.append(m)
+
+    visit(main_name, parsed_modules[0].pos)
+    unused = set(by_name) - visited
+    if unused:
+        raise SemaError(
+            f"module(s) {sorted(unused)} were given but are not imported "
+            f"(directly or transitively) by the main module '{main_name}'",
+            by_name[main_name].pos,
+        )
+    return order
+
+
+def analyze_program(parsed_modules: list[A.Module]) -> AnalyzedProgram:
+    """`parsed_modules[0]` is the program's entry point -- its body becomes
+    the compiled program's actual `main`; every other module's body (if
+    it has one) runs as that module's own initialization code, in
+    dependency order, before anything that imports it runs."""
+    ordered = _order_modules(parsed_modules)
+    analyzer = Analyzer()
+    for m in ordered:
+        analyzer.analyze_module(m)
+    return AnalyzedProgram(
+        modules_in_order=[m.name for m in ordered],
+        module_scopes=analyzer.modules,
+        module_bodies=analyzer.module_bodies,
+        proc_instances=analyzer.codegen_queue,
+        main_module=ordered[-1].name,
+    )
+
 
 def analyze(module: A.Module) -> AnalyzedProgram:
-    return Analyzer().run(module)
+    return analyze_program([module])

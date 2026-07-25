@@ -1,0 +1,25 @@
+(* Multi-module compilation: `modplusc run import_demo.m2p mathutils.m2p`
+   -- the entry module is always listed first; every other file must be
+   IMPORTed by it, directly or transitively. Qualified access
+   (`MathUtils.Square`, `MathUtils.CallCount`, `MathUtils.Limit`) reaches
+   MathUtils's exported PROCEDUREs, VARs, and CONSTs alike.
+*)
+MODULE ImportDemo;
+IMPORT MathUtils;
+
+VAR i, total: INTEGER;
+
+BEGIN
+  total := 0;
+  FOR i := 1 TO 4 DO
+    total := total + MathUtils.Square(i);
+  END;
+  WriteInt(total);
+  WriteLn;
+  WriteInt(MathUtils.CallCount);
+  WriteLn;
+  WriteInt(MathUtils.Clamp(500));
+  WriteLn;
+  WriteInt(MathUtils.Limit);
+  WriteLn;
+END ImportDemo.

@@ -9,7 +9,7 @@ import llvmlite.binding as llvm
 from .codegen import generate
 from .errors import ModplusError
 from .parser import parse
-from .sema import analyze
+from .sema import analyze_program
 
 _initialized = False
 
@@ -22,8 +22,12 @@ def _ensure_llvm_initialized() -> None:
         _initialized = True
 
 
-def compile_to_llvm_ir(source: str, module_name: str = "modplus_module") -> str:
-    program = analyze(parse(source))
+def compile_to_llvm_ir(sources: list[str], module_name: str = "modplus_module") -> str:
+    """`sources[0]` is the program's entry module; any others must be
+    (directly or transitively) IMPORTed by it -- see
+    `sema.py`'s `_order_modules` for the exact rules."""
+    modules = [parse(src) for src in sources]
+    program = analyze_program(modules)
     llvm_module = generate(program, module_name)
     ir_text = str(llvm_module)
     _ensure_llvm_initialized()
@@ -31,9 +35,9 @@ def compile_to_llvm_ir(source: str, module_name: str = "modplus_module") -> str:
     return ir_text
 
 
-def compile_to_object(source: str, module_name: str = "modplus_module") -> bytes:
+def compile_to_object(sources: list[str], module_name: str = "modplus_module") -> bytes:
     _ensure_llvm_initialized()
-    ir_text = compile_to_llvm_ir(source, module_name)
+    ir_text = compile_to_llvm_ir(sources, module_name)
     llvm_module = llvm.parse_assembly(ir_text)
     # `reloc="pic"` matters here: most modern Linux distros default to
     # linking position-independent executables, and the linker rejects
@@ -47,12 +51,13 @@ def compile_to_object(source: str, module_name: str = "modplus_module") -> bytes
     return target_machine.emit_object(llvm_module)
 
 
-def run(source: str, module_name: str = "modplus_module") -> int:
-    """JIT-compile `source` and execute its module body (`main`), returning
-    the process-style exit code it produced."""
+def run(sources: list[str], module_name: str = "modplus_module") -> int:
+    """JIT-compile `sources` (entry module first) and execute the compiled
+    program's `main`, returning the process-style exit code it produced."""
 
     _ensure_llvm_initialized()
-    program = analyze(parse(source))
+    modules = [parse(src) for src in sources]
+    program = analyze_program(modules)
     llvm_ir_module = generate(program, module_name)
     llvm_module = llvm.parse_assembly(str(llvm_ir_module))
     llvm_module.verify()

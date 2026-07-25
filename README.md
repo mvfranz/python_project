@@ -31,8 +31,23 @@ BEGIN
 END GenericsMax.
 ```
 
+Multiple modules compile together in one invocation, with implicit,
+qualified-only exports:
+
+```modula2
+MODULE Main;
+IMPORT MathUtils;
+BEGIN
+  WriteInt(MathUtils.Square(6));   (* -> 36 *)
+END Main.
+```
+```bash
+modplusc run main.m2p mathutils.m2p   # entry module first
+```
+
 See [`examples/`](examples/) for more (generics with non-type parameters,
-manual `NEW`/`DISPOSE` linked lists, and `OWN` pointers), and
+manual `NEW`/`DISPOSE` linked lists, `OWN` pointers, and the two-module
+`import_demo.m2p`/`mathutils.m2p` pair), and
 [`docs/language_spec.md`](docs/language_spec.md) for the full language
 reference and the design rationale behind each feature.
 
@@ -58,6 +73,10 @@ reference and the design rationale behind each feature.
   `OWN POINTER TO T` is scope-bound: the compiler inserts the matching
   `free()` on every path out of its declaring scope, and manually calling
   `DISPOSE` on one is a compile error.
+- **Multi-module, whole-program compilation.** `IMPORT` brings in another
+  module's exports (`Foo.Bar`, qualified-only); every listed source file
+  compiles together into one LLVM module -- see
+  [§3.1](docs/language_spec.md#31-multi-module-compilation-and-import).
 
 ## Install
 
@@ -73,6 +92,9 @@ pip install -e .[test]
 modplusc run examples/hello.m2p          # JIT-compile and execute
 modplusc emit-llvm examples/hello.m2p     # print LLVM IR
 modplusc emit-object examples/hello.m2p -o hello.o   # native object file
+
+# multiple modules: entry module first, then anything it IMPORTs
+modplusc run examples/import_demo.m2p examples/mathutils.m2p
 ```
 
 ```bash

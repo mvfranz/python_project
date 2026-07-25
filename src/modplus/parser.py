@@ -79,6 +79,7 @@ class Parser:
         self._expect_kw("MODULE")
         name = self._expect_ident()
         self._expect_op(";")
+        imports = self._parse_imports()
         consts, types, vars_, procs = self._parse_decl_sections(top_level=True)
         self._expect_kw("BEGIN")
         body = self._parse_stmt_seq()
@@ -89,7 +90,21 @@ class Parser:
                 f"mismatched module end name: expected {name!r}, got {end_name!r}", self._pos()
             )
         self._expect_op(".")
-        return A.Module(name, consts, types, vars_, procs, body, pos)
+        return A.Module(name, imports, consts, types, vars_, procs, body, pos)
+
+    def _parse_imports(self) -> list[A.ImportedName]:
+        imports: list[A.ImportedName] = []
+        while self._at_kw("IMPORT"):
+            self._advance()
+            while True:
+                ipos = self._pos()
+                imports.append(A.ImportedName(self._expect_ident(), ipos))
+                if self._at_op(","):
+                    self._advance()
+                    continue
+                break
+            self._expect_op(";")
+        return imports
 
     # -- declarations ----------------------------------------------------
 
@@ -511,6 +526,17 @@ class Parser:
             return self._parse_designator()
         raise ParseError(f"unexpected token {tok.text!r} in expression", pos)
 
+    def _parse_paren_args(self) -> list[A.Expr]:
+        self._expect_op("(")
+        args = []
+        if not self._at_op(")"):
+            args.append(self._parse_expr())
+            while self._at_op(","):
+                self._advance()
+                args.append(self._parse_expr())
+        self._expect_op(")")
+        return args
+
     def _parse_designator_only(self, context: str) -> A.Designator:
         pos = self._pos()
         result = self._parse_designator()
@@ -535,15 +561,37 @@ class Parser:
                 self._restore(checkpoint)
 
         if self._at_op("("):
-            self._advance()
-            args = []
-            if not self._at_op(")"):
-                args.append(self._parse_expr())
-                while self._at_op(","):
-                    self._advance()
-                    args.append(self._parse_expr())
-            self._expect_op(")")
+            args = self._parse_paren_args()
             return A.Call(name, type_args, args, pos)
+
+        # A qualified call to an imported module's procedure, e.g.
+        # `Foo.Bar(...)` or (rejected later, with a clear message, by
+        # sema.py -- generic templates cannot yet be imported) `Foo.Bar<...>(...)`.
+        # A qualified *value* reference (`Foo.SomeVar`, not followed by a
+        # call) is intentionally left to fall through to the ordinary
+        # parts loop below as `Designator("Foo", [FieldAccess("SomeVar")])`
+        # -- the parser can't yet tell "Foo" is a module rather than a
+        # RECORD-valued variable; sema disambiguates that once it can look
+        # names up.
+        if type_args is None and self._at_op(".") and self._tok(1).kind == TokKind.IDENT:
+            checkpoint = self._checkpoint()
+            self._advance()  # '.'
+            member = self._expect_ident()
+            member_type_args: list[A.TypeArg] | None = None
+            if self._at_op("<"):
+                inner_checkpoint = self._checkpoint()
+                try:
+                    candidate = self._parse_type_arg_list()
+                    if self._at_op("("):
+                        member_type_args = candidate
+                    else:
+                        self._restore(inner_checkpoint)
+                except ParseError:
+                    self._restore(inner_checkpoint)
+            if self._at_op("("):
+                args = self._parse_paren_args()
+                return A.Call(member, member_type_args, args, pos, qualifier=name)
+            self._restore(checkpoint)
 
         parts: list[A.DesignatorPart] = []
         while True:

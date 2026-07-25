@@ -36,23 +36,94 @@ implementation choice:
 
 ## 3. Module structure
 
-A modplus program is a single `MODULE`:
+A modplus program is one or more `MODULE`s:
 
 ```modula2
 MODULE Name;
+IMPORT Other;  (* optional, zero or more, comma lists allowed *)
   (* CONST / TYPE / VAR / PROCEDURE sections, in any order, any number of times *)
 BEGIN
-  (* statement sequence: the program's entry point *)
+  (* statement sequence: this module's own initialization code *)
 END Name.
 ```
-
-There is no `IMPORT` / multi-module linking in this prototype -- see
-[§11](#11-known-limitations). Every program is one file, one `MODULE`.
 
 Unlike classic Modula-2, procedures do **not** need forward declarations:
 every top-level `PROCEDURE`'s signature is registered before any body is
 type-checked, so mutual recursion and "helper defined below `main`" both
 just work.
+
+### 3.1 Multi-module compilation and IMPORT
+
+```bash
+modplusc run main.m2p helper.m2p   # main.m2p is the entry module
+```
+
+Every module the program needs is listed on the command line; the
+**first** file is the entry module, and every other file must be
+IMPORTed by it, directly or transitively (an extra file that nothing
+imports is a compile error -- far more likely a typo than an intentional
+no-op, so it's rejected rather than silently ignored). There is no
+filesystem search path to configure and no build manifest: the module
+graph is exactly what you name on the command line.
+
+**Exports are implicit and qualified-only.** Every top-level
+`CONST`/`TYPE`/`VAR`/`PROCEDURE` a module declares is automatically
+visible to any module that `IMPORT`s it, reached as `ModuleName.Name` --
+there is no separate `DEFINITION MODULE`/`EXPORT` list to maintain, and
+no unqualified `FROM Foo IMPORT Bar;` form (deliberately simpler than
+classic Modula-2 on both counts; see [§11](#11-known-limitations)):
+
+```modula2
+MODULE MathUtils;
+VAR CallCount: INTEGER;
+PROCEDURE Square(x: INTEGER): INTEGER;
+BEGIN
+  CallCount := CallCount + 1;
+  RETURN x * x;
+END Square;
+BEGIN
+  CallCount := 0;
+END MathUtils.
+```
+
+```modula2
+MODULE Main;
+IMPORT MathUtils;
+BEGIN
+  WriteInt(MathUtils.Square(3));   (* qualified call *)
+  WriteInt(MathUtils.CallCount);   (* qualified variable reference *)
+END Main.
+```
+
+A module name occupies the same namespace as everything else -- you
+can't `IMPORT Foo;` and also declare a local `VAR Foo: INTEGER;` -- and
+qualified access only reaches a module you actually `IMPORT`ed yourself:
+being part of the same compilation (because *something else* imports it)
+doesn't make its members visible to you.
+
+**Compilation is whole-program, not separately-linked.** All imported
+modules are parsed, type-checked, and code-generated together into a
+single LLVM module -- there's no per-file object file, no `extern`
+linkage, and no separate link step for modplus code (native output via
+`emit-object` still goes through a real linker, just with everything
+already combined). The trade-off: touching one file means recompiling
+the whole program, same as a unity/jumbo build. What you get in exchange
+is a much smaller compiler: cross-module calls are just calls to an
+already-emitted LLVM function, with no ABI-stability-across-translation-units
+concerns to design for.
+
+**Module initialization order.** Every module's `BEGIN...END` body --
+including the entry module's -- becomes its own `{Name}$init` function.
+The compiled program's real `main` calls each module's `$init` in
+dependency order (an imported module's initialization always completes
+before anything that imports it runs) and the entry module's runs last,
+playing the role "the program" would play if there were no other modules
+at all.
+
+Circular `IMPORT`s are rejected outright with the cycle spelled out
+(`circular IMPORT: A -> B -> A`) -- there's no notion of "partially
+initialized" a cycle could produce, so this is caught before any
+analysis of the involved modules' bodies even happens.
 
 ## 4. Types
 
@@ -280,7 +351,20 @@ aren't proven to execute their body), so a function can't rely on a
 Deliberate scope cuts for this prototype, listed so they read as decisions
 rather than surprises:
 
-- **No `IMPORT` / multi-module compilation.** One `MODULE` per program.
+- **Generic templates cannot be imported.** `GENERIC PROCEDURE`/`TYPE`
+  declarations, and explicit specializations of them, are only visible
+  within their own module -- a qualified reference to one (`Foo.Bar<T>`)
+  fails, since generic names are never declared into a module's exported
+  scope at all (see [§3.1](#31-multi-module-compilation-and-import)).
+- **No qualified TYPE references.** `VAR x: Foo.SomeType;` isn't
+  supported -- only qualified CONST/VAR/PROCEDURE access parses. Sharing
+  a type across modules currently means duplicating its declaration.
+- **No selective/unqualified IMPORT.** Only `IMPORT Foo;` (whole-module,
+  qualified-access) -- no `FROM Foo IMPORT Bar;`.
+- **No separate export list.** Every top-level declaration is
+  automatically exported; there's no `DEFINITION MODULE`-equivalent way
+  to keep something module-private while still using it across
+  procedures in the same module.
 - **No nested procedures** (see [§8](#8-scoping)).
 - **No array bounds checking** (see [§4.2](#42-record-and-array)).
 - **Template argument deduction is shallow** -- only bare `a: T` formal
@@ -297,27 +381,39 @@ rather than surprises:
 ## 12. Compiler architecture
 
 ```
-source.m2p -> lexer.py -> parser.py -> sema.py -> codegen.py -> LLVM IR
-                                                                    |
-                                                    +---------------+---------------+
-                                                    |                               |
-                                              jit.py (MCJIT)                emit-object (native .o)
+source.m2p (x N) -> lexer.py -> parser.py -> sema.py -> codegen.py -> LLVM IR
+                                                                          |
+                                                       +---------------+---------------+
+                                                       |                               |
+                                                 jit.py (MCJIT)                emit-object (native .o)
 ```
 
 - **`lexer.py` / `parser.py`** -- hand-written tokenizer and recursive-descent
   parser producing a plain-dataclass AST (`ast_nodes.py`).
 - **`types.py` / `symbols.py`** -- the nominal type system and the two-level
-  scope chain.
+  scope chain. `symbols.ImportedModuleSymbol` is the marker declared for each
+  `IMPORT`ed name, occupying the same namespace as everything else so a
+  colliding local declaration is caught by the same duplicate-name check.
 - **`sema.py`** -- name resolution, strong type-checking, and the generics
   monomorphization engine described in [§6.4](#64-monomorphization-precisely).
   Annotates the AST in place (`.resolved_type` and friends) so codegen never
-  re-derives a decision sema already made.
+  re-derives a decision sema already made. `analyze_program` orchestrates
+  multiple modules: `_order_modules` topologically sorts them (validating
+  the import graph along the way -- unknown/unused modules, cycles), then a
+  single `Analyzer` instance processes each in dependency order, resetting
+  its per-module state (scope, generic template caches) between modules
+  while accumulating the cross-module registries (`modules`,
+  `module_bodies`, the codegen queue). Module-level names get mangled with
+  their module as a prefix (`Foo$Bar`) precisely so this can all still
+  land in one LLVM module without collisions.
 - **`codegen.py`** -- walks the annotated AST once, emitting LLVM IR via
   [llvmlite](https://github.com/numba/llvmlite). Each `Codegen` instance owns
   a private LLVM `Context`, since identified struct types are keyed by name
   *within* a context -- without this, two independent compilations that both
-  declare a `RECORD` named `Node` would collide.
+  declare a `RECORD` named `Node` would collide. Every module gets its own
+  `{Name}$init` function; the real `main` calls them in dependency order.
 - **`jit.py` / `cli.py`** -- MCJIT execution (`modplusc run`), textual IR
   dump (`modplusc emit-llvm`), and native object-file emission via a real
   `TargetMachine` (`modplusc emit-object`, position-independent so the
-  result links straight into a PIE executable).
+  result links straight into a PIE executable). All three take one or more
+  source files, entry module first.

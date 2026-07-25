@@ -14,8 +14,8 @@ from .subprocess_helpers import run_file
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 
 
-def run_example(name: str) -> str:
-    result = run_file(EXAMPLES_DIR / name)
+def run_example(name: str, *extra_names: str) -> str:
+    result = run_file(EXAMPLES_DIR / name, *(EXAMPLES_DIR / n for n in extra_names))
     assert result.returncode == 0, result.stderr
     return result.stdout
 
@@ -45,3 +45,8 @@ def test_linked_list():
 def test_own_pointer():
     out = [int(line) for line in run_example("own_pointer.m2p").splitlines()]
     assert out == [60]
+
+
+def test_import_demo():
+    out = [int(line) for line in run_example("import_demo.m2p", "mathutils.m2p").splitlines()]
+    assert out == [30, 4, 100, 100]
