@@ -54,7 +54,14 @@ def test_import_demo():
 
 def test_strings():
     out = run_example("strings.m2p")
-    assert out.splitlines() == ["modplus", "Hello, Ada!", "Hello, Grace!"]
+    assert out.splitlines() == [
+        "modplus",
+        "Hello, Ada!",
+        "Hello, Grace!",
+        "TRUE",
+        "FALSE",
+        "TRUE",
+    ]
 
 
 def test_generic_linked_list():

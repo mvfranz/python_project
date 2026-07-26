@@ -225,10 +225,31 @@ representation.
 `WriteString(x)` is a builtin that prints either a string literal or an
 `ARRAY OF CHAR` variable to standard output, stopping at the first `NUL`
 byte; it takes exactly one argument and does not append a newline (pair it
-with `WriteLn`). There is deliberately no string equality, comparison, or
-concatenation -- those would require either runtime bounds tracking or
-hidden allocation, both against the zero-hidden-cost design goal
-([§1](#1-philosophy-and-cost-model)).
+with `WriteLn`).
+
+`=`, `#`/`<>`, `<`, `<=`, `>`, and `>=` all work between two `ARRAY OF
+CHAR` values, or a value and a literal, following the same
+NUL-terminated-bytes convention as `WriteString` -- comparison doesn't
+require the operands' declared `ARRAY` sizes to match, so an `ARRAY[5]
+OF CHAR` and an `ARRAY[20] OF CHAR` holding equal text compare equal:
+
+```modula2
+VAR a: ARRAY[5] OF CHAR; b: ARRAY[20] OF CHAR;
+a := "hi"; b := "hi";
+IF a = b THEN ... END;        (* TRUE despite the size mismatch *)
+IF a < "hj" THEN ... END;     (* lexicographic, like C's strcmp *)
+```
+
+Just like `WriteString`, each operand must be a string literal or an
+ordinary variable/field/element -- comparison needs an address (or a
+literal's own materialized global) to read bytes from. This is a
+genuine `strcmp`-style byte loop at run time, not a free operation the
+way `INTEGER` comparison is -- but it costs exactly what a hand-written
+comparison would, nothing hidden beyond that. It's also an addition
+beyond Modula-2 itself, which has no array comparison operators at all;
+see [§11](#11-known-limitations). There is still no string
+concatenation -- that would require hidden allocation, against the
+zero-hidden-cost design goal ([§1](#1-philosophy-and-cost-model)).
 
 ## 5. Declarations
 
@@ -458,8 +479,9 @@ rather than surprises:
   `POINTER TO T`) require explicit `<...>` instantiation.
 - **No first-class procedures** -- you can call a `PROCEDURE` by name,
   but can't store one in a variable or pass it as a value.
-- **No string equality, comparison, or concatenation** -- string literals
-  are only assignable/passable to `ARRAY OF CHAR`; see [§4.5](#45-string-literals).
+- **No string concatenation** -- only assignment, passing by value, and
+  `=`/`#`/`<`/`<=`/`>`/`>=` comparison are supported; see
+  [§4.5](#45-string-literals).
 - **Strings are 8-bit (Latin-1) only** -- a string literal containing a
   code point above 255 is rejected at compile time.
 

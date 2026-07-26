@@ -493,3 +493,108 @@ def test_write_string_rejects_reserved_name_redeclaration():
         """,
         "reserved",
     )
+
+
+def test_string_equality_between_char_array_variables():
+    prog = check(
+        """
+        MODULE M;
+        VAR a, b: ARRAY[10] OF CHAR; flag: BOOLEAN;
+        BEGIN
+          a := "hello";
+          b := "hello";
+          flag := a = b;
+          flag := a # b;
+        END M.
+        """
+    )
+    assert prog is not None
+
+
+def test_string_equality_between_variable_and_literal():
+    prog = check(
+        """
+        MODULE M;
+        VAR a: ARRAY[10] OF CHAR; flag: BOOLEAN;
+        BEGIN
+          a := "hello";
+          flag := a = "hello";
+          flag := "hello" # a;
+        END M.
+        """
+    )
+    assert prog is not None
+
+
+def test_string_ordering_comparison():
+    prog = check(
+        """
+        MODULE M;
+        VAR flag: BOOLEAN;
+        BEGIN
+          flag := "abc" < "abd";
+          flag := "abc" <= "abc";
+          flag := "b" > "a";
+          flag := "b" >= "b";
+        END M.
+        """
+    )
+    assert prog is not None
+
+
+def test_string_comparison_against_non_char_array_rejected():
+    expect_error(
+        """
+        MODULE M;
+        VAR a: ARRAY[10] OF CHAR; i: INTEGER; flag: BOOLEAN;
+        BEGIN
+          flag := a = i;
+        END M.
+        """,
+        "cannot compare",
+    )
+
+
+def test_string_comparison_against_record_rejected():
+    expect_error(
+        """
+        MODULE M;
+        TYPE P = RECORD x: INTEGER; END;
+        VAR a: ARRAY[10] OF CHAR; p: P; flag: BOOLEAN;
+        BEGIN
+          flag := a = p;
+        END M.
+        """,
+        "cannot compare",
+    )
+
+
+def test_char_arrays_of_different_sizes_can_be_compared():
+    # Comparison follows WriteString's NUL-terminated-bytes convention,
+    # not exact-array-type equality, so mismatched declared sizes are fine.
+    prog = check(
+        """
+        MODULE M;
+        VAR a: ARRAY[5] OF CHAR; b: ARRAY[20] OF CHAR; flag: BOOLEAN;
+        BEGIN
+          a := "hi";
+          b := "hi";
+          flag := a = b;
+        END M.
+        """
+    )
+    assert prog is not None
+
+
+def test_strcmp_rejects_reserved_name_redeclaration():
+    expect_error(
+        """
+        MODULE M;
+        PROCEDURE strcmp(x: INTEGER);
+        BEGIN
+        END strcmp;
+        BEGIN
+        END M.
+        """,
+        "reserved",
+    )
