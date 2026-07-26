@@ -330,6 +330,31 @@ A direct consequence, also true of C++ templates: **an uninstantiated
 generic's body is never type-checked or compiled.** If nothing in the
 program ever calls `Max<CHAR>`, that instantiation simply never exists.
 
+### 6.5 Self-referential generic types
+
+A generic `RECORD` can contain a `POINTER TO` its own (same type
+arguments) instantiation, the same way a plain module-level `RECORD`
+can reference itself:
+
+```modula2
+TYPE
+  Node<T> = RECORD
+    value: T;
+    next: POINTER TO Node<T>;
+  END;
+
+VAR head: POINTER TO Node<INTEGER>;
+```
+
+This works because instantiating `Node<T>` caches the (still-empty)
+struct under its mangled name (`Node$INTEGER`) *before* resolving its
+fields -- so when field resolution reaches `POINTER TO Node<T>` with the
+same template arguments, it finds that same not-yet-finished struct
+instead of recursing forever, exactly mirroring how a non-generic
+`RECORD`'s own forward self-reference is resolved. A `POINTER` field
+only ever needs its pointee's *identity*, never its complete layout, so
+"still being filled in" is fine.
+
 ## 7. Strong typing and conversions
 
 Assignment, `RETURN`, and argument-passing all require the value's type to
@@ -431,9 +456,6 @@ rather than surprises:
 - **Template argument deduction is shallow** -- only bare `a: T` formal
   parameters participate; nested occurrences (`ARRAY[N] OF T`,
   `POINTER TO T`) require explicit `<...>` instantiation.
-- **No self-referential generic types** -- a generic `RECORD` can't
-  contain a `POINTER TO` its own (still-being-instantiated) type the way
-  a plain module-level `RECORD` can.
 - **No first-class procedures** -- you can call a `PROCEDURE` by name,
   but can't store one in a variable or pass it as a value.
 - **No string equality, comparison, or concatenation** -- string literals

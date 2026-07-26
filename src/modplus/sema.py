@@ -398,6 +398,19 @@ class Analyzer:
             )
         subst_scope = self._make_subst_scope(template.type_params, type_args, pos)
         mangled_name = self._mangle(name, type_args)
+        if isinstance(template.type, A.RecordType):
+            # Cache the (still-empty) RecordType under `key` before resolving
+            # its fields, exactly mirroring the module-level RECORD
+            # forward-reference trick (see the `record_placeholders` pass in
+            # `analyze_module`): a field that reaches back into this same
+            # instantiation (`POINTER TO Node<T>` inside `Node<T>` itself)
+            # hits this cache and gets the placeholder's identity, which is
+            # all a POINTER field needs -- its own layout doesn't depend on
+            # what Node<T> contains.
+            placeholder = types.RecordType(mangled_name)
+            self.type_instances[key] = placeholder
+            self._resolve_record_fields(template.type, subst_scope, placeholder)
+            return placeholder
         t = self.resolve_type_expr(template.type, subst_scope, name_hint=mangled_name)
         self.type_instances[key] = t
         return t

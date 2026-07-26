@@ -55,3 +55,9 @@ def test_import_demo():
 def test_strings():
     out = run_example("strings.m2p")
     assert out.splitlines() == ["modplus", "Hello, Ada!", "Hello, Grace!"]
+
+
+def test_generic_linked_list():
+    out = run_example("generic_linked_list.m2p").splitlines()
+    assert out[0] == "150"
+    assert out[1] == "4.000000"
