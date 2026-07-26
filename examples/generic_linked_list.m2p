@@ -1,0 +1,57 @@
+(* A self-referential GENERIC TYPE: Node<T> contains a POINTER TO its own
+   (same-T) instantiation, exactly like a hand-written linked-list node
+   but reusable for any element type. Node<INTEGER> and Node<REAL> below
+   monomorphize to two distinct LLVM struct types, with no shared
+   representation or runtime type tag -- see docs/language_spec.md §6.5.
+*)
+MODULE GenericLinkedList;
+
+TYPE
+  Node<T> = RECORD
+    value: T;
+    next: POINTER TO Node<T>;
+  END;
+
+VAR
+  ihead, icur, itmp: POINTER TO Node<INTEGER>;
+  rhead, rcur: POINTER TO Node<REAL>;
+  i, itotal: INTEGER;
+
+BEGIN
+  ihead := NIL;
+  FOR i := 1 TO 5 DO
+    NEW(icur);
+    icur^.value := i * 10;
+    icur^.next := ihead;
+    ihead := icur;
+  END;
+
+  itotal := 0;
+  icur := ihead;
+  WHILE icur # NIL DO
+    itotal := itotal + icur^.value;
+    icur := icur^.next;
+  END;
+  WriteInt(itotal);
+  WriteLn;
+
+  icur := ihead;
+  WHILE icur # NIL DO
+    itmp := icur^.next;
+    DISPOSE(icur);
+    icur := itmp;
+  END;
+
+  NEW(rhead);
+  rhead^.value := 1.5;
+  rhead^.next := NIL;
+  NEW(rcur);
+  rcur^.value := 2.5;
+  rcur^.next := rhead;
+
+  WriteReal(rcur^.value + rcur^.next^.value);
+  WriteLn;
+
+  DISPOSE(rcur);
+  DISPOSE(rhead);
+END GenericLinkedList.

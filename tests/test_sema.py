@@ -271,6 +271,64 @@ def test_generic_record_with_non_type_param():
     assert sym.type.fields[0].type == types.ArrayType(types.INTEGER, 4)
 
 
+def test_self_referential_generic_record_type():
+    prog = check(
+        """
+        MODULE M;
+        TYPE
+          Node<T> = RECORD
+            value: T;
+            next: POINTER TO Node<T>;
+          END;
+        VAR head, cur: POINTER TO Node<INTEGER>;
+        BEGIN
+          NEW(head);
+          head^.value := 1;
+          head^.next := NIL;
+          NEW(cur);
+          cur^.value := 2;
+          cur^.next := head;
+        END M.
+        """
+    )
+    sym = prog.module_scopes[prog.main_module].lookup("head")
+    assert isinstance(sym.type, types.PointerType)
+    node_t = sym.type.base
+    assert isinstance(node_t, types.RecordType)
+    next_field = node_t.field("next")
+    assert isinstance(next_field.type, types.PointerType)
+    # the self-reference resolves back to the very same monomorphized
+    # RecordType instance, not a distinct copy of it.
+    assert next_field.type.base is node_t
+
+
+def test_self_referential_generic_type_two_instantiations_are_distinct():
+    prog = check(
+        """
+        MODULE M;
+        TYPE
+          Node<T> = RECORD
+            value: T;
+            next: POINTER TO Node<T>;
+          END;
+        VAR ihead: POINTER TO Node<INTEGER>;
+        VAR rhead: POINTER TO Node<REAL>;
+        BEGIN
+          NEW(ihead);
+          ihead^.value := 1;
+          ihead^.next := NIL;
+          NEW(rhead);
+          rhead^.value := 1.5;
+          rhead^.next := NIL;
+        END M.
+        """
+    )
+    isym = prog.module_scopes[prog.main_module].lookup("ihead")
+    rsym = prog.module_scopes[prog.main_module].lookup("rhead")
+    assert isym.type.base.name != rsym.type.base.name
+    assert isym.type.base is not rsym.type.base
+
+
 def test_nested_procedures_rejected():
     expect_error(
         """
