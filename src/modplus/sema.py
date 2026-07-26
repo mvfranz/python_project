@@ -462,10 +462,32 @@ class Analyzer:
                 seen.add(n)
                 rt.add_field(n, ft)
 
+    def _lookup_qualified_member(
+        self, qualifier: str, name: str, scope: Scope, pos: SourcePos
+    ) -> Symbol:
+        """Resolves `qualifier.name` to the exported symbol it names --
+        shared by qualified TYPE references (`resolve_type_expr`,
+        `resolve_type_arg`) since both need the same "is this actually an
+        imported module, and does it actually export this name" checks
+        that `_resolve_designator_base`/`_analyze_qualified_call` also do
+        for qualified CONST/VAR/PROCEDURE access."""
+        qualifier_sym = scope.lookup(qualifier)
+        if not isinstance(qualifier_sym, ImportedModuleSymbol):
+            raise SemaError(f"'{qualifier}' is not an imported module", pos)
+        member_sym = self.modules[qualifier].symbols.get(name)
+        if member_sym is None:
+            raise SemaError(f"module '{qualifier}' has no exported member '{name}'", pos)
+        return member_sym
+
     def resolve_type_expr(
         self, node: A.TypeExpr, scope: Scope, name_hint: str | None = None
     ) -> types.Type:
         if isinstance(node, A.NamedType):
+            if node.qualifier is not None:
+                qsym = self._lookup_qualified_member(node.qualifier, node.name, scope, node.pos)
+                if not isinstance(qsym, TypeSymbol):
+                    raise SemaError(f"'{node.qualifier}.{node.name}' is not a type", node.pos)
+                return qsym.type
             builtin = types.builtin_named_type(node.name)
             if builtin is not None:
                 return builtin
@@ -497,6 +519,12 @@ class Analyzer:
             base = self.resolve_type_expr(node.base, scope)
             return types.PointerType(base, node.owning)
         if isinstance(node, A.GenericInstanceType):
+            if node.qualifier is not None:
+                raise SemaError(
+                    "generic types cannot (yet) be imported, so "
+                    f"'{node.qualifier}.{node.name}<...>' is not supported",
+                    node.pos,
+                )
             args = [self.resolve_type_arg(a, scope) for a in node.type_args]
             return self.instantiate_generic_type(node.name, args, node.pos)
         raise SemaError("invalid type expression", node.pos)  # pragma: no cover
@@ -505,6 +533,18 @@ class Analyzer:
         if isinstance(arg, A.IntLit):
             return arg.value
         if isinstance(arg, A.NamedType):
+            if arg.qualifier is not None:
+                qsym = self._lookup_qualified_member(arg.qualifier, arg.name, scope, arg.pos)
+                if isinstance(qsym, ConstSymbol):
+                    if qsym.type is not types.INTEGER:
+                        raise SemaError(
+                            "only INTEGER constants are supported as non-type template arguments",
+                            arg.pos,
+                        )
+                    return qsym.value
+                if isinstance(qsym, TypeSymbol):
+                    return qsym.type
+                raise SemaError(f"'{arg.qualifier}.{arg.name}' is not a type or constant", arg.pos)
             builtin = types.builtin_named_type(arg.name)
             if builtin is not None:
                 return builtin

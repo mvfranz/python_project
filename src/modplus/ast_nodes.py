@@ -26,6 +26,7 @@ class TypeExpr:
 class NamedType(TypeExpr):
     name: str
     pos: SourcePos
+    qualifier: str | None = None
 
 
 @dataclass
@@ -60,6 +61,7 @@ class GenericInstanceType(TypeExpr):
     name: str
     type_args: list[TypeArg]
     pos: SourcePos
+    qualifier: str | None = None
 
 
 # A template/type argument is either a type expression or a constant expression

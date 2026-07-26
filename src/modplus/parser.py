@@ -311,10 +311,20 @@ class Parser:
             return A.NamedType(name, pos)
         if self._tok().kind == TokKind.IDENT:
             name = self._advance().text
+            qualifier: str | None = None
+            # A qualified type reference to an imported module's TYPE, e.g.
+            # `MathUtils.Point`. Unlike the designator case (parser.py's
+            # `_parse_designator`), a type name is never itself indexed or
+            # field-accessed, so there's no ambiguity to defer to sema here:
+            # `Foo.Bar` in type position is always "Bar from module Foo".
+            if self._at_op(".") and self._tok(1).kind == TokKind.IDENT:
+                qualifier = name
+                self._advance()  # '.'
+                name = self._expect_ident()
             if self._at_op("<"):
                 args = self._parse_type_arg_list()
-                return A.GenericInstanceType(name, args, pos)
-            return A.NamedType(name, pos)
+                return A.GenericInstanceType(name, args, pos, qualifier=qualifier)
+            return A.NamedType(name, pos, qualifier=qualifier)
         raise ParseError(f"expected a type, got {self._tok().text!r}", pos)
 
     def _parse_type_arg_list(self) -> list[A.TypeArg]:

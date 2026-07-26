@@ -49,7 +49,7 @@ def test_own_pointer():
 
 def test_import_demo():
     out = [int(line) for line in run_example("import_demo.m2p", "mathutils.m2p").splitlines()]
-    assert out == [30, 4, 100, 100]
+    assert out == [30, 4, 100, 100, 25]
 
 
 def test_strings():
