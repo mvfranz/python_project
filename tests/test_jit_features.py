@@ -189,6 +189,36 @@ def test_string_assignment_and_write_string(tmp_path):
     assert result.stdout.splitlines() == ["Hello, world!", "Hello, Ada!"]
 
 
+def test_string_comparison(tmp_path):
+    src = """
+    MODULE M;
+    VAR a, b: ARRAY[10] OF CHAR;
+    BEGIN
+      a := "hello";
+      b := "hello";
+      WriteBool(a = b);
+      WriteLn;
+
+      b := "world";
+      WriteBool(a = b);
+      WriteLn;
+      WriteBool(a # b);
+      WriteLn;
+
+      WriteBool(a = "hello");
+      WriteLn;
+
+      WriteBool(a < b);
+      WriteLn;
+      WriteBool("abc" <= "abc");
+      WriteLn;
+    END M.
+    """
+    result = run_source(tmp_path, src)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["TRUE", "FALSE", "TRUE", "TRUE", "TRUE", "TRUE"]
+
+
 def test_recursive_generic_instantiation(tmp_path):
     src = """
     MODULE M;

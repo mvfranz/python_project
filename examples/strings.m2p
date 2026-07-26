@@ -4,11 +4,14 @@
    room for its text plus a null terminator, and can likewise be passed
    directly as a by-value ARRAY OF CHAR argument. WriteString prints
    either a literal or an ARRAY OF CHAR variable, stopping at the first
-   null byte.
+   null byte. `=`/`#`/`<`/etc. between two ARRAY OF CHAR values (or a
+   value and a literal) compare bytes the same NUL-terminated way,
+   regardless of the arrays' own declared sizes.
 *)
 MODULE Strings;
 
 VAR greeting: ARRAY[20] OF CHAR;
+VAR name: ARRAY[10] OF CHAR;
 
 PROCEDURE Greet(who: ARRAY[10] OF CHAR);
 BEGIN
@@ -25,4 +28,12 @@ BEGIN
 
   Greet("Ada");
   Greet("Grace");
+
+  name := "Ada";
+  WriteBool(name = "Ada");
+  WriteLn;
+  WriteBool(name = greeting);
+  WriteLn;
+  WriteBool(name < "Grace");
+  WriteLn;
 END Strings.

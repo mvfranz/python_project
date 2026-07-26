@@ -63,7 +63,7 @@ BUILTIN_VOID_PROCS: dict[str, types.Type | None] = {
 RESERVED_NAMES = (
     set(BUILTIN_CONVERSIONS)
     | set(BUILTIN_VOID_PROCS)
-    | {"WriteString", "malloc", "free", "printf", "main"}
+    | {"WriteString", "malloc", "free", "printf", "strcmp", "main"}
 )
 
 
@@ -77,6 +77,17 @@ def is_assignable(value_type: types.Type, target_type: types.Type) -> bool:
             and target_type.size >= value_type.length + 1
         )
     return value_type == target_type
+
+
+def is_char_array_like(t: types.Type) -> bool:
+    """True for the operand types string comparison (`=`, `#`, `<`, ...)
+    accepts: an ARRAY OF CHAR value or a string literal (`StringLitType`)
+    -- the same set WriteString accepts, since comparison reuses its
+    NUL-terminated-bytes convention (see `_gen_string_compare` in
+    codegen.py)."""
+    return isinstance(t, types.StringLitType) or (
+        isinstance(t, types.ArrayType) and t.elem is types.CHAR
+    )
 
 
 def _c_div(a: int, b: int) -> int:
@@ -789,6 +800,9 @@ class Analyzer:
             lt = self._require_expr_type(expr.left, scope)
             rt = self._require_expr_type(expr.right, scope)
             t = self._check_binop(expr.op, lt, rt, expr.pos)
+            if is_char_array_like(lt) and is_char_array_like(rt):
+                self._check_string_compare_operand(expr.left, expr.pos)
+                self._check_string_compare_operand(expr.right, expr.pos)
             expr.resolved_type = t
             return t
         if isinstance(expr, A.UnaryOp):
@@ -883,6 +897,13 @@ class Analyzer:
                 if not isinstance(other, types.PointerType):
                     raise SemaError("NIL can only be compared to a POINTER", pos)
                 return types.BOOLEAN
+            if is_char_array_like(lt) or is_char_array_like(rt):
+                if not (is_char_array_like(lt) and is_char_array_like(rt)):
+                    raise SemaError(
+                        f"'{op}' cannot compare {types.type_name(lt)} with {types.type_name(rt)}",
+                        pos,
+                    )
+                return types.BOOLEAN
             if isinstance(lt, (types.RecordType, types.ArrayType)) or isinstance(
                 rt, (types.RecordType, types.ArrayType)
             ):
@@ -895,6 +916,13 @@ class Analyzer:
                 )
             return types.BOOLEAN
         if op in ("<", "<=", ">", ">="):
+            if is_char_array_like(lt) or is_char_array_like(rt):
+                if not (is_char_array_like(lt) and is_char_array_like(rt)):
+                    raise SemaError(
+                        f"'{op}' cannot compare {types.type_name(lt)} with {types.type_name(rt)}",
+                        pos,
+                    )
+                return types.BOOLEAN
             if lt not in (types.INTEGER, types.REAL, types.CHAR) or lt != rt:
                 raise SemaError(f"'{op}' requires matching INTEGER, REAL, or CHAR operands", pos)
             return types.BOOLEAN
@@ -903,6 +931,15 @@ class Analyzer:
                 raise SemaError(f"'{op}' requires BOOLEAN operands", pos)
             return types.BOOLEAN
         raise SemaError(f"unknown operator '{op}'", pos)  # pragma: no cover
+
+    def _check_string_compare_operand(self, operand: A.Expr, pos: SourcePos) -> None:
+        # Mirrors WriteString's own restriction (see `_analyze_call`):
+        # comparison needs an address to read bytes from, and a string
+        # literal is materialized into its own global instead of being a
+        # loadable value (see codegen.py), so those are the only two
+        # shapes a char-array-like operand can take.
+        if not isinstance(operand, (A.Designator, A.StringLit)):
+            raise SemaError("string comparison requires a string literal or a variable", pos)
 
     def _check_unaryop(self, op: str, ot: types.Type, pos: SourcePos) -> types.Type:
         if op == "-":

@@ -22,7 +22,7 @@ import llvmlite.ir as ir
 from . import ast_nodes as A
 from . import types
 from .errors import CodegenError
-from .sema import AnalyzedProgram, ProcInstance
+from .sema import AnalyzedProgram, ProcInstance, is_char_array_like
 from .symbols import ConstSymbol, ImportedModuleSymbol, Scope, Symbol, VarSymbol
 
 I64 = ir.IntType(64)
@@ -54,6 +54,7 @@ class Codegen:
             self.module, ir.FunctionType(I32, [I8P], var_arg=True), "printf"
         )
         self.fflush_fn = ir.Function(self.module, ir.FunctionType(I32, [I8P]), "fflush")
+        self.strcmp_fn = ir.Function(self.module, ir.FunctionType(I32, [I8P, I8P]), "strcmp")
         self._string_cache: dict[tuple[str, str], ir.GlobalVariable] = {}
         self._string_counter = 0
         self.program: AnalyzedProgram | None = None
@@ -441,6 +442,13 @@ class Codegen:
 
     def _gen_binop(self, expr: A.BinOp, scope: Scope) -> ir.Value:
         op = expr.op
+        if (
+            expr.left.resolved_type is not None
+            and expr.right.resolved_type is not None
+            and is_char_array_like(expr.left.resolved_type)
+            and is_char_array_like(expr.right.resolved_type)
+        ):
+            return self._gen_string_compare(op, expr.left, expr.right, scope)
         lt: types.Type
         if isinstance(expr.left, A.NilLit):
             right_t = expr.right.resolved_type
@@ -461,6 +469,23 @@ class Codegen:
             lv = self.gen_expr(expr.left, scope)
             rv = self.gen_expr(expr.right, scope)
         return self._emit_binop(op, lt, lv, rv)
+
+    def _gen_string_compare(self, op: str, left: A.Expr, right: A.Expr, scope: Scope) -> ir.Value:
+        assert self.builder is not None
+        lp = self._char_array_ptr(left, scope)
+        rp = self._char_array_ptr(right, scope)
+        result = self.builder.call(self.strcmp_fn, [lp, rp])
+        return self.builder.icmp_signed(_CMP_PRED[op], result, ir.Constant(I32, 0))
+
+    def _char_array_ptr(self, expr: A.Expr, scope: Scope) -> ir.Value:
+        assert self.builder is not None
+        if isinstance(expr, A.StringLit):
+            # See _gen_write_builtin's WriteString case for why this is
+            # latin-1, not the internal format strings' plain utf-8.
+            return self._global_string(expr.value, encoding="latin-1")
+        assert isinstance(expr, A.Designator)
+        addr, _t = self.gen_designator_address(expr, scope)
+        return self.builder.bitcast(addr, I8P)
 
     def _emit_binop(self, op: str, lt: types.Type, lv: ir.Value, rv: ir.Value) -> ir.Value:
         b = self.builder
@@ -538,17 +563,7 @@ class Codegen:
             self.builder.call(self.printf_fn, [self._global_string("\n")])
             return
         if name == "WriteString":
-            arg = call.args[0]
-            if isinstance(arg, A.StringLit):
-                # CHAR is one byte, so this literal's own global uses the
-                # same latin-1 (one code point, one byte) encoding sema
-                # validated it against -- unlike the internal, ASCII-only
-                # format-string constants below, which are plain utf-8.
-                ptr = self._global_string(arg.value, encoding="latin-1")
-            else:
-                assert isinstance(arg, A.Designator)
-                addr, _t = self.gen_designator_address(arg, scope)
-                ptr = self.builder.bitcast(addr, I8P)
+            ptr = self._char_array_ptr(call.args[0], scope)
             self.builder.call(self.printf_fn, [self._global_string("%s"), ptr])
             return
         arg_val = self.gen_expr(call.args[0], scope)
