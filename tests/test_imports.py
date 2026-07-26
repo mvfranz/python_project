@@ -8,6 +8,7 @@ test_examples.py::test_import_demo.
 
 import pytest
 
+from modplus import types
 from modplus.errors import SemaError
 from modplus.parser import parse
 from modplus.sema import analyze_program
@@ -171,3 +172,116 @@ def test_var_by_ref_qualified_argument():
     """
     prog = check(main, MATH_UTILS)
     assert prog.main_module == "Main"
+
+
+SHAPES = """
+MODULE Shapes;
+TYPE Point = RECORD x, y: INTEGER; END;
+BEGIN
+END Shapes.
+"""
+
+
+def test_qualified_type_reference_for_var_declaration():
+    main = """
+    MODULE Main;
+    IMPORT Shapes;
+    VAR p: Shapes.Point;
+    BEGIN
+      p.x := 1;
+      p.y := 2;
+    END Main.
+    """
+    prog = check(main, SHAPES)
+    sym = prog.module_scopes["Main"].lookup("p")
+    assert isinstance(sym.type, types.RecordType)
+
+
+def test_qualified_type_reference_as_procedure_parameter():
+    main = """
+    MODULE Main;
+    IMPORT Shapes;
+    PROCEDURE Distance2(a: Shapes.Point): INTEGER;
+    BEGIN
+      RETURN a.x * a.x + a.y * a.y;
+    END Distance2;
+    VAR p: Shapes.Point; d: INTEGER;
+    BEGIN
+      p.x := 3;
+      p.y := 4;
+      d := Distance2(p);
+    END Main.
+    """
+    prog = check(main, SHAPES)
+    assert prog.main_module == "Main"
+
+
+def test_qualified_type_reference_as_generic_template_argument():
+    main = """
+    MODULE Main;
+    IMPORT Shapes;
+    TYPE Box<T> = RECORD v: T; END;
+    VAR b: Box<Shapes.Point>;
+    BEGIN
+      b.v.x := 5;
+    END Main.
+    """
+    prog = check(main, SHAPES)
+    sym = prog.module_scopes["Main"].lookup("b")
+    assert isinstance(sym.type, types.RecordType)
+    assert isinstance(sym.type.fields[0].type, types.RecordType)
+
+
+def test_qualified_type_reference_requires_import():
+    other = """
+    MODULE Other;
+    VAR p: Shapes.Point;
+    BEGIN
+    END Other.
+    """
+    main = """
+    MODULE Main;
+    IMPORT Shapes, Other;
+    BEGIN
+    END Main.
+    """
+    expect_error([main, SHAPES, other], "'Shapes' is not an imported module")
+
+
+def test_qualified_type_reference_to_unexported_name_rejected():
+    main = """
+    MODULE Main;
+    IMPORT Shapes;
+    VAR p: Shapes.NoSuchType;
+    BEGIN
+    END Main.
+    """
+    expect_error([main, SHAPES], "has no exported member 'NoSuchType'")
+
+
+def test_qualified_reference_to_non_type_member_rejected():
+    main = """
+    MODULE Main;
+    IMPORT MathUtils;
+    VAR p: MathUtils.Square;
+    BEGIN
+    END Main.
+    """
+    expect_error([main, MATH_UTILS], "'MathUtils.Square' is not a type")
+
+
+def test_qualified_generic_type_instantiation_rejected():
+    generic_shapes = """
+    MODULE GenericShapes;
+    TYPE Box<T> = RECORD v: T; END;
+    BEGIN
+    END GenericShapes.
+    """
+    main = """
+    MODULE Main;
+    IMPORT GenericShapes;
+    VAR b: GenericShapes.Box<INTEGER>;
+    BEGIN
+    END Main.
+    """
+    expect_error([main, generic_shapes], "generic types cannot")

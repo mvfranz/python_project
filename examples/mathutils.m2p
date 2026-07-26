@@ -10,6 +10,11 @@ MODULE MathUtils;
 CONST
   Limit = 100;
 
+TYPE
+  Point = RECORD
+    x, y: INTEGER;
+  END;
+
 VAR
   CallCount: INTEGER;
 
@@ -26,6 +31,11 @@ BEGIN
   END;
   RETURN x;
 END Clamp;
+
+PROCEDURE Distance2(a: Point): INTEGER;
+BEGIN
+  RETURN a.x * a.x + a.y * a.y;
+END Distance2;
 
 BEGIN
   CallCount := 0;

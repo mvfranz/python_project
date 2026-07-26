@@ -94,6 +94,36 @@ BEGIN
 END Main.
 ```
 
+A qualified `TYPE` reference (`MathUtils.Point`) works the same way,
+anywhere a type is expected -- a `VAR` declaration, a `PROCEDURE`
+parameter or return type, a field type, or a generic template argument
+(`Box<MathUtils.Point>`). It names the real, importing-module-independent
+type MathUtils declared -- a `VAR p: MathUtils.Point;` is an ordinary
+local `Point` value, not a handle back into MathUtils, exactly as if
+`Point` had been declared locally:
+
+```modula2
+MODULE MathUtils;
+TYPE Point = RECORD x, y: INTEGER; END;
+...
+```
+
+```modula2
+MODULE Main;
+IMPORT MathUtils;
+VAR origin: MathUtils.Point;
+BEGIN
+  origin.x := 3;
+  origin.y := 4;
+END Main.
+```
+
+`GENERIC TYPE`s cannot themselves be imported (see
+[§11](#11-known-limitations)), so `MathUtils.Box<INTEGER>` -- a qualified
+reference to a *generic* type, with its own `<...>` instantiation -- is
+rejected; only ordinary (non-generic) exported types can be referenced
+this way.
+
 A module name occupies the same namespace as everything else -- you
 can't `IMPORT Foo;` and also declare a local `VAR Foo: INTEGER;` -- and
 qualified access only reaches a module you actually `IMPORT`ed yourself:
@@ -390,9 +420,6 @@ rather than surprises:
   within their own module -- a qualified reference to one (`Foo.Bar<T>`)
   fails, since generic names are never declared into a module's exported
   scope at all (see [§3.1](#31-multi-module-compilation-and-import)).
-- **No qualified TYPE references.** `VAR x: Foo.SomeType;` isn't
-  supported -- only qualified CONST/VAR/PROCEDURE access parses. Sharing
-  a type across modules currently means duplicating its declaration.
 - **No selective/unqualified IMPORT.** Only `IMPORT Foo;` (whole-module,
   qualified-access) -- no `FROM Foo IMPORT Bar;`.
 - **No separate export list.** Every top-level declaration is

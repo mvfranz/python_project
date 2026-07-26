@@ -2,12 +2,16 @@
    -- the entry module is always listed first; every other file must be
    IMPORTed by it, directly or transitively. Qualified access
    (`MathUtils.Square`, `MathUtils.CallCount`, `MathUtils.Limit`) reaches
-   MathUtils's exported PROCEDUREs, VARs, and CONSTs alike.
+   MathUtils's exported PROCEDUREs, VARs, and CONSTs alike, and
+   `MathUtils.Point` (a qualified TYPE reference) reaches its exported
+   RECORD type the same way -- `origin` below is a real, local Point
+   value, not a handle back into MathUtils.
 *)
 MODULE ImportDemo;
 IMPORT MathUtils;
 
 VAR i, total: INTEGER;
+VAR origin: MathUtils.Point;
 
 BEGIN
   total := 0;
@@ -21,5 +25,10 @@ BEGIN
   WriteInt(MathUtils.Clamp(500));
   WriteLn;
   WriteInt(MathUtils.Limit);
+  WriteLn;
+
+  origin.x := 3;
+  origin.y := 4;
+  WriteInt(MathUtils.Distance2(origin));
   WriteLn;
 END ImportDemo.

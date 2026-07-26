@@ -136,6 +136,36 @@ def test_nested_procedures_are_parsed_but_flagged_for_sema():
     assert len(proc.nested_procs) == 1
 
 
+def test_qualified_type_name_parses():
+    mod = parse(
+        """
+        MODULE M;
+        VAR p: Shapes.Point;
+        BEGIN
+        END M.
+        """
+    )
+    (vd,) = mod.vars
+    assert isinstance(vd.type, A.NamedType)
+    assert vd.type.qualifier == "Shapes"
+    assert vd.type.name == "Point"
+
+
+def test_qualified_generic_type_instantiation_parses():
+    mod = parse(
+        """
+        MODULE M;
+        VAR b: Shapes.Box<INTEGER>;
+        BEGIN
+        END M.
+        """
+    )
+    (vd,) = mod.vars
+    assert isinstance(vd.type, A.GenericInstanceType)
+    assert vd.type.qualifier == "Shapes"
+    assert vd.type.name == "Box"
+
+
 def test_string_literal_parses_as_an_expression():
     mod = parse(
         """
