@@ -49,6 +49,9 @@ BUILTIN_CONVERSIONS: dict[str, tuple[types.Type, types.Type]] = {
 
 # Minimal console output, implemented directly in terms of libc's printf
 # (see codegen.py); `None` means the builtin takes no arguments.
+# `WriteString` takes an ARRAY OF CHAR of *any* size (or a string literal),
+# not one fixed type, so it's checked separately in `_analyze_call` rather
+# than fitting this dict's one-expected-type shape.
 BUILTIN_VOID_PROCS: dict[str, types.Type | None] = {
     "WriteInt": types.INTEGER,
     "WriteReal": types.REAL,
@@ -58,13 +61,21 @@ BUILTIN_VOID_PROCS: dict[str, types.Type | None] = {
 }
 
 RESERVED_NAMES = (
-    set(BUILTIN_CONVERSIONS) | set(BUILTIN_VOID_PROCS) | {"malloc", "free", "printf", "main"}
+    set(BUILTIN_CONVERSIONS)
+    | set(BUILTIN_VOID_PROCS)
+    | {"WriteString", "malloc", "free", "printf", "main"}
 )
 
 
 def is_assignable(value_type: types.Type, target_type: types.Type) -> bool:
     if isinstance(value_type, types.NilType):
         return isinstance(target_type, types.PointerType)
+    if isinstance(value_type, types.StringLitType):
+        return (
+            isinstance(target_type, types.ArrayType)
+            and target_type.elem is types.CHAR
+            and target_type.size >= value_type.length + 1
+        )
     return value_type == target_type
 
 
@@ -707,6 +718,17 @@ class Analyzer:
         if isinstance(expr, A.CharLit):
             expr.resolved_type = types.CHAR
             return types.CHAR
+        if isinstance(expr, A.StringLit):
+            for ch in expr.value:
+                if ord(ch) > 255:
+                    raise SemaError(
+                        f"string literal contains {ch!r}, which has no 8-bit CHAR "
+                        "representation (code point > 255)",
+                        expr.pos,
+                    )
+            string_t = types.StringLitType(len(expr.value))
+            expr.resolved_type = string_t
+            return string_t
         if isinstance(expr, A.NilLit):
             expr.resolved_type = types.NIL
             return types.NIL
@@ -911,6 +933,30 @@ class Analyzer:
             return self._analyze_qualified_call(call, scope)
 
         name = call.name
+
+        if name == "WriteString":
+            if call.type_args is not None:
+                raise SemaError("'WriteString' is a builtin, not a template", call.pos)
+            if len(call.args) != 1:
+                raise SemaError("'WriteString' takes exactly one argument", call.pos)
+            arg = call.args[0]
+            at = self._require_expr_type(arg, scope)
+            is_char_array = isinstance(at, types.ArrayType) and at.elem is types.CHAR
+            is_string_lit = isinstance(at, types.StringLitType)
+            if not (is_char_array or is_string_lit):
+                raise SemaError(
+                    f"'WriteString' expects an ARRAY OF CHAR or a string literal, "
+                    f"got {types.type_name(at)}",
+                    call.pos,
+                )
+            if is_char_array and not isinstance(arg, A.Designator):
+                # Printing needs an address to read from; a string literal
+                # is materialized into its own global instead (see
+                # codegen.py), so only that case can be an arbitrary
+                # non-addressable expression.
+                raise SemaError("'WriteString' requires a string literal or a variable", call.pos)
+            call.is_builtin_void_proc = "WriteString"
+            return None
 
         if name in BUILTIN_VOID_PROCS:
             if call.type_args is not None:

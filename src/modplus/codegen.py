@@ -54,7 +54,7 @@ class Codegen:
             self.module, ir.FunctionType(I32, [I8P], var_arg=True), "printf"
         )
         self.fflush_fn = ir.Function(self.module, ir.FunctionType(I32, [I8P]), "fflush")
-        self._string_cache: dict[str, ir.GlobalVariable] = {}
+        self._string_cache: dict[tuple[str, str], ir.GlobalVariable] = {}
         self._string_counter = 0
         self.program: AnalyzedProgram | None = None
 
@@ -393,6 +393,11 @@ class Codegen:
     def gen_expr_as(self, expr: A.Expr, scope: Scope, expected_type: types.Type) -> ir.Value:
         if isinstance(expr, A.NilLit):
             return ir.Constant(self.llvm_type(expected_type), None)
+        if isinstance(expr, A.StringLit):
+            assert isinstance(expected_type, types.ArrayType)
+            data = expr.value.encode("latin-1") + b"\0"
+            padded = data.ljust(expected_type.size, b"\0")
+            return ir.Constant(self.llvm_type(expected_type), bytearray(padded))
         return self.gen_expr(expr, scope)
 
     def gen_expr(self, expr: A.Expr, scope: Scope) -> ir.Value:
@@ -413,6 +418,8 @@ class Codegen:
             return ir.Constant(I8, ord(expr.value))
         if isinstance(expr, A.NilLit):
             raise CodegenError("NIL used outside of a known-pointer-type context")
+        if isinstance(expr, A.StringLit):
+            raise CodegenError("string literal used outside of a known-ARRAY-type context")
         if isinstance(expr, A.BinOp):
             return self._gen_binop(expr, scope)
         if isinstance(expr, A.UnaryOp):
@@ -509,11 +516,12 @@ class Codegen:
             return self.builder.not_(ov)
         raise CodegenError(f"unsupported unary operator '{expr.op}'")  # pragma: no cover
 
-    def _global_string(self, text: str) -> ir.Value:
+    def _global_string(self, text: str, encoding: str = "utf-8") -> ir.Value:
         assert self.builder is not None
-        cached = self._string_cache.get(text)
+        cache_key = (encoding, text)
+        cached = self._string_cache.get(cache_key)
         if cached is None:
-            data = text.encode("utf-8") + b"\0"
+            data = text.encode(encoding) + b"\0"
             arr_ty = ir.ArrayType(I8, len(data))
             self._string_counter += 1
             gv = ir.GlobalVariable(self.module, arr_ty, name=f".str.{self._string_counter}")
@@ -521,13 +529,27 @@ class Codegen:
             gv.linkage = "private"
             gv.initializer = ir.Constant(arr_ty, bytearray(data))
             cached = gv
-            self._string_cache[text] = gv
+            self._string_cache[cache_key] = gv
         return self.builder.gep(cached, [ir.Constant(I32, 0), ir.Constant(I32, 0)], inbounds=True)
 
     def _gen_write_builtin(self, name: str, call: A.Call, scope: Scope) -> None:
         assert self.builder is not None
         if name == "WriteLn":
             self.builder.call(self.printf_fn, [self._global_string("\n")])
+            return
+        if name == "WriteString":
+            arg = call.args[0]
+            if isinstance(arg, A.StringLit):
+                # CHAR is one byte, so this literal's own global uses the
+                # same latin-1 (one code point, one byte) encoding sema
+                # validated it against -- unlike the internal, ASCII-only
+                # format-string constants below, which are plain utf-8.
+                ptr = self._global_string(arg.value, encoding="latin-1")
+            else:
+                assert isinstance(arg, A.Designator)
+                addr, _t = self.gen_designator_address(arg, scope)
+                ptr = self.builder.bitcast(addr, I8P)
+            self.builder.call(self.printf_fn, [self._global_string("%s"), ptr])
             return
         arg_val = self.gen_expr(call.args[0], scope)
         if name == "WriteInt":

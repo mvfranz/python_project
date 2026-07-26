@@ -131,6 +131,23 @@ class NilType(Type):
 NIL = NilType()
 
 
+class StringLitType(Type):
+    """The type of a string literal (`"hello"`): assignable to any
+    `ARRAY[N] OF CHAR` with room for the text plus a null terminator, but
+    not a real type of its own -- there is no standalone `STRING` type
+    (see `docs/language_spec.md`'s STRING section for why). Mirrors
+    `NilType`'s role for pointers: a literal-only marker that widens
+    assignment compatibility without generalizing ARRAY assignment
+    itself (two same-element, different-size ARRAYs are still not
+    interchangeable)."""
+
+    def __init__(self, length: int) -> None:
+        self.length = length
+
+    def __repr__(self) -> str:
+        return f"STRING literal (length {self.length})"
+
+
 def is_value_type(t: Type) -> bool:
     return isinstance(t, (ScalarType, ArrayType, RecordType))
 

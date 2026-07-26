@@ -28,9 +28,8 @@ implementation choice:
   `OWN`, ...). Identifiers are case-sensitive.
 - Comments are `(* ... *)` and may nest.
 - Literals: `42` (INTEGER), `3.14` / `1e3` (REAL), `'A'` (CHAR, single
-  quotes), `"text"` (STRING -- lexed, but there is no `STRING` type yet;
-  see [§11](#11-known-limitations)), `TRUE`/`FALSE` (BOOLEAN), `NIL`
-  (untyped pointer literal).
+  quotes), `"text"` (a string literal -- see [§4.5](#45-string-literals)),
+  `TRUE`/`FALSE` (BOOLEAN), `NIL` (untyped pointer literal).
 - Operators: `:=  + - * / = # < <= > >= ( ) [ ] . , ; : ^`, and the
   keyword-operators `DIV MOD AND OR NOT`.
 
@@ -165,6 +164,41 @@ See [§9](#9-memory-management).
 `NIL` has no type of its own; it is only valid where a `POINTER` (owning
 or not) is expected -- as an assignment's right-hand side, a `RETURN`
 value, an argument, or either side of `=`/`#`.
+
+### 4.5 String literals
+
+Like Modula-2 itself, modplus has no dedicated `STRING` type. A string
+literal `"text"` is instead a literal-only marker type (`StringLitType`,
+carrying its length), exactly analogous to how `NIL` (`NilType`,
+[§4.4](#44-the-nil-literal)) widens assignment compatibility without being
+a real type of its own. `"text"` is assignment-compatible with any
+`ARRAY[N] OF CHAR` where `N` is large enough to hold the text plus a
+trailing null terminator (`N >= length + 1`), and by the same rule can be
+passed directly wherever an `ARRAY OF CHAR` is expected by value:
+
+```modula2
+VAR greeting: ARRAY[20] OF CHAR;
+PROCEDURE Greet(who: ARRAY[10] OF CHAR); ...
+
+greeting := "modplus";     (* OK: 7 chars + NUL fits in 20 *)
+Greet("Ada");               (* OK: literal passed by value *)
+```
+
+A string literal is not addressable, so it cannot be passed as a `VAR`
+parameter, and `Foo("x")` and `"x" := ...`-style direct storage requires
+going through an `ARRAY OF CHAR` variable first.
+
+Only 8-bit (Latin-1) characters are supported -- a literal containing a
+code point above 255 is a compile-time error, matching `CHAR`'s single-byte
+representation.
+
+`WriteString(x)` is a builtin that prints either a string literal or an
+`ARRAY OF CHAR` variable to standard output, stopping at the first `NUL`
+byte; it takes exactly one argument and does not append a newline (pair it
+with `WriteLn`). There is deliberately no string equality, comparison, or
+concatenation -- those would require either runtime bounds tracking or
+hidden allocation, both against the zero-hidden-cost design goal
+([§1](#1-philosophy-and-cost-model)).
 
 ## 5. Declarations
 
@@ -375,8 +409,10 @@ rather than surprises:
   a plain module-level `RECORD` can.
 - **No first-class procedures** -- you can call a `PROCEDURE` by name,
   but can't store one in a variable or pass it as a value.
-- **`STRING` literals lex but have no type** -- there's no `STRING` type
-  yet, so `"..."` can't currently be assigned or passed anywhere.
+- **No string equality, comparison, or concatenation** -- string literals
+  are only assignable/passable to `ARRAY OF CHAR`; see [§4.5](#45-string-literals).
+- **Strings are 8-bit (Latin-1) only** -- a string literal containing a
+  code point above 255 is rejected at compile time.
 
 ## 12. Compiler architecture
 
